@@ -7,8 +7,8 @@ import toml
 import matplotlib.pyplot as plt
 from pfs.datamodel import Identity, PfsArm
 from pfs.datamodel.pfsConfig import PfsConfig, TargetType
-from opDB import OpDB
-from qaDB import QaDB
+from .opDB import OpDB
+from .qaDB import QaDB
 import logzero
 from logzero import logger
 
