@@ -777,12 +777,18 @@ class Condition(object):
                 if saveFig == True:
                     plt.savefig(os.path.join(dirName, f'{figName}_guide_error.pdf'), bbox_inches='tight')
 
-    def getCondition(self, visits, plot=True, xaxis='taken_at', cc='cameraId', saveFig=False, figName='', dirName='.'):
+    def getCondition(self, visits, showPlot=True, xaxis='taken_at', cc='cameraId', saveFig=False, figName='', dirName='.'):
         """Calculate various observing condition such as seeing, transparency, etc. 
 
         Parameters
         ----------
             visits : `pfs_visit_id` or `list` of `pfs_visit_id`
+            showPlot : `bool` (default: True)
+            xaxis : `str` (default: taken_at)
+            cc : `str` (default: cameraId)
+            saveFig : `bool` (default: False)
+            figName : `str`
+            dirName : `str`
 
         Examples
         ----------
@@ -798,7 +804,7 @@ class Condition(object):
             else:
                 logger.warning(f"already calculated for visit={visit}...")
                 pass
-        if plot == True:
+        if showPlot == True:
             self.plotSeeing(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotTransparency(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotAgBackground(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
@@ -819,8 +825,8 @@ class Condition(object):
             if visit not in self.visitList:
                 visits_to_send.append(visit)
             
-        self.getCondition(visits=visits_to_send, plot=True, xaxis=xaxis, cc=cc)
+        self.getCondition(visits=visits_to_send, showPlot=True, xaxis=xaxis, cc=cc)
 
-    def update(self, visit, plot=True, xaxis='taken_at', cc='cameraIid'):
-        self.getCondition(visits=[visit], plot=plot, xaxis=xaxis, cc=cc)
+    def update(self, visit, showPlot=True, xaxis='taken_at', cc='cameraIid'):
+        self.getCondition(visits=[visit], showPlot=showPlot, xaxis=xaxis, cc=cc)
         return 0
