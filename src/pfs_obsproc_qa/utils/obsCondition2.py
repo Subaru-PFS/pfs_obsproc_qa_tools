@@ -51,7 +51,7 @@ class Condition(object):
 
         """
 
-        # configuration
+        # load configuration
         self.conf = read_conf(conf)       
 
         # visit list

@@ -13,6 +13,26 @@ SEEING_NOMINAL = 0.80        # arcsec
 TRANSPARENCY_NOMINAL = 0.90  # 
 NOISE_LEVEL_NOMINAL = 10.0   # ADU?
 
+__all__ = ["ExposureTime"]
+
+
+def read_conf(conf):
+    """
+    Parameters
+    ----------
+        conf: `str` config toml filepath (default: config.toml)
+    
+    Returns
+    ----------
+        config: return of toml.load
+    
+    Examples
+    ----------
+
+    """
+    config = toml.load(conf)
+    return config
+
 class ExposureTime(object):
     """Exposure Time
 
@@ -41,10 +61,11 @@ class ExposureTime(object):
             t_eff = t_nominal x (sigma_sky,nom/sigma_sky,obs)^2 x (\\xi_obs/\\xi_nom)^2 x (\\eta_obs/\\eta_nom)^2
 
     """
-    def __init__(self, object_faintness=1):
+    def __init__(self, conf='config.toml', object_faintness=1):
         """        
         Parameters
         ----------
+            conf: `str` config toml filepath (default: config.toml)
             object_faintness : `int` (0=bright, 1=faint, default=1)
         
         Returns
@@ -55,6 +76,9 @@ class ExposureTime(object):
         ----------
 
         """
+
+        # load configuration
+        self.conf = read_conf(conf)       
 
         # nominal values etc.
         self.TEXP_NOMINAL = TEXP_NOMINAL
