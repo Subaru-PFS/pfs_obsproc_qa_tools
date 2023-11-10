@@ -49,12 +49,12 @@ class QaDB(object):
                         keys = keys + k + ','
                         vals = vals + str(v) + ','
                     if len(data) > 1:
-                        sqlCmd = text(f'UPDATE {tableName} SET ({keys[:-1]}) = ({vals[:-1]}) WHERE pfs_visit_id={pfs_visit_id}')
+                        sqlCmd = text(f'UPDATE {tableName} SET ({keys[:-1]}) = ({vals[:-1]}) WHERE pfs_visit_id={pfs_visit_id};')
                     else:
-                        sqlCmd = text(f'UPDATE {tableName} SET {keys[:-1]} = {vals[:-1]} WHERE pfs_visit_id={pfs_visit_id}')
-                        
+                        sqlCmd = text(f'UPDATE {tableName} SET {keys[:-1]} = {vals[:-1]} WHERE pfs_visit_id={pfs_visit_id};')
                     with self._engine.connect() as conn:
                         conn.execute(sqlCmd)
+                        conn.commit()
                     logger.info(f'pfs_visit_id={pfs_visit_id} updated!')
                 else:
                     logger.info('No update...')

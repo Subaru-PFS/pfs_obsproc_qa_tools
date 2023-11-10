@@ -16,34 +16,52 @@ __all__ = ["Condition"]
 
 
 def read_conf(conf):
+    """
+    Parameters
+    ----------
+        conf: `str` config toml filepath (default: config.toml)
+    
+    Returns
+    ----------
+        config: return of toml.load
+    
+    Examples
+    ----------
+
+    """
     config = toml.load(conf)
     return config
 
 
 class Condition(object):
     """Observing condition
-
-    Parameters
-    ----------
-
-    Examples
-    ----------
-
     """
     
     def __init__(self, conf='config.toml'):
+        """
+        Parameters
+        ----------
+            conf: `str` config toml filepath (default: config.toml)
+        
+        Returns
+        ----------
+            
+        Examples
+        ----------
 
-        ''' configuration '''
+        """
+
+        # configuration
         self.conf = read_conf(conf)       
 
-        ''' visit list '''
+        # visit list
         self.visitList = []
 
-        ''' database '''
+        # database
         self.opdb = OpDB(self.conf["db"]["opdb"])
         self.qadb = QaDB(self.conf["db"]["qadb"])
 
-        ''' dataframe for condition '''
+        # dataframe for condition
         self.df_guide_error = None
         self.df_seeing = None
         self.df_transparency = None
@@ -62,18 +80,57 @@ class Condition(object):
         logzero.logfile(self.conf['logger']['logfile'], disableStderrLogger=True)
         
     def getAgcData(self, visit):
+        """ Get AGC data information
+
+        Parameters
+        ----------
+            visit : pfs_visit_id
+        
+        Returns
+        ----------
+            
+        Examples
+        ----------
+
+        """
         sqlWhere = f'agc_exposure.pfs_visit_id={visit}'
         sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.taken_at,agc_data.agc_camera_id,central_image_moment_11_pix,central_image_moment_20_pix,central_image_moment_02_pix,background,estimated_magnitude,agc_data.flags,agc_match.guide_star_id,pfs_design_agc.guide_star_magnitude FROM agc_exposure JOIN agc_data ON agc_exposure.agc_exposure_id=agc_data.agc_exposure_id JOIN agc_match ON agc_data.agc_exposure_id=agc_match.agc_exposure_id AND agc_data.agc_camera_id=agc_match.agc_camera_id AND agc_data.spot_id=agc_match.spot_id JOIN pfs_design_agc ON agc_match.pfs_design_id=pfs_design_agc.pfs_design_id AND agc_match.guide_star_id=pfs_design_agc.guide_star_id WHERE {sqlWhere} AND agc_data.flags<=1 ORDER BY agc_exposure.agc_exposure_id;'
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
         return df
     
     def getSpsExposure(self, visit):
+        """ Get SpS exposure information
+
+        Parameters
+        ----------
+            visit : pfs_visit_id
+        
+        Returns
+        ----------
+            
+        Examples
+        ----------
+
+        """
         sqlWhere = f'sps_exposure.pfs_visit_id={visit}'
         sqlCmd = f'SELECT * FROM sps_exposure WHERE {sqlWhere};'
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
         return df
 
     def getGuideError(self, visit):
+        """ Get GuideError information
+
+        Parameters
+        ----------
+            visit : pfs_visit_id
+        
+        Returns
+        ----------
+            
+        Examples
+        ----------
+
+        """
         sqlWhere = f'agc_exposure.pfs_visit_id={visit}'
         sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.taken_at,agc_guide_offset.guide_ra,agc_guide_offset.guide_dec,agc_guide_offset.guide_pa,agc_guide_offset.guide_delta_ra,agc_guide_offset.guide_delta_dec,agc_guide_offset.guide_delta_insrot,agc_guide_offset.guide_delta_az,agc_guide_offset.guide_delta_el,agc_guide_offset.guide_delta_z,agc_guide_offset.guide_delta_z1,agc_guide_offset.guide_delta_z2,agc_guide_offset.guide_delta_z3,agc_guide_offset.guide_delta_z4,agc_guide_offset.guide_delta_z5,agc_guide_offset.guide_delta_z6,agc_guide_offset.guide_delta_scale,agc_guide_offset.mask FROM agc_exposure JOIN agc_guide_offset ON agc_exposure.agc_exposure_id=agc_guide_offset.agc_exposure_id WHERE {sqlWhere} ORDER BY agc_exposure.agc_exposure_id;'
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
@@ -88,6 +145,7 @@ class Condition(object):
         Parameters
         ----------
             visit : pfs_visit_id
+        
         Returns
         ----------
             agc_exposure_id : AGC exposure ID
@@ -100,7 +158,7 @@ class Condition(object):
         """
 
 
-        ''' get information from agc_data table '''
+        # get information from agc_data table
         df = self.getAgcData(visit)
 
         agc_exposure_id = df['agc_exposure_id']
@@ -110,7 +168,7 @@ class Condition(object):
         agc_camera_id = df['agc_camera_id']
         flags = df['flags']
 
-        ''' calculate FWHM (reference: Magnier et al. 2020, ApJS, 251, 5) '''
+        # calculate FWHM (reference: Magnier et al. 2020, ApJS, 251, 5)
         g1 = df['central_image_moment_20_pix'] + df['central_image_moment_02_pix']
         g2 = df['central_image_moment_20_pix'] - df['central_image_moment_02_pix']
         g3 = np.sqrt(g2**2 + 4*df['central_image_moment_11_pix']**2)
@@ -118,7 +176,7 @@ class Condition(object):
         sigma_b = self.conf['agc']['ag_pix_scale'] * np.sqrt((g1-g3)/2)
         sigma = np.sqrt(sigma_a*sigma_b)
         
-        ''' simple calculation '''
+        # simple calculation 
         #varia = df['central_image_moment_20_pix'] * df['central_image_moment_02_pix'] - df['central_image_moment_11_pix']**2
         #sigma = self.conf['agc']['ag_pix_scale'] * varia**0.25
 
@@ -140,7 +198,7 @@ class Condition(object):
         else:
             self.df_seeing = pd.concat([self.df_seeing, df], ignore_index=True)
         
-        ''' calculate typical values per agc_exposure_id '''
+        # calculate typical values per agc_exposure_id
         taken_at_seq = []
         agc_exposure_seq = []
         visit_seq = []
@@ -167,7 +225,7 @@ class Condition(object):
         else:
             self.df_seeing_stats = pd.concat([self.df_seeing_stats, df], ignore_index=True)
 
-        ''' calculate typical values per pfs_visit_id '''
+        # calculate typical values per pfs_visit_id
         visit_p_visit = []
         fwhm_mean_p_visit = []    # calculate mean per visit
         fwhm_median_p_visit = []  # calculate median per visit
@@ -177,7 +235,7 @@ class Condition(object):
         fwhm_median_p_visit.append(fwhm[pfs_visit_id == visit].median(skipna=True))
         fwhm_stddev_p_visit.append(fwhm[pfs_visit_id == visit].std(skipna=True))
 
-        ''' insert into qaDB '''
+        # insert into qaDB
         df = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit}
             )
@@ -289,7 +347,7 @@ class Condition(object):
                 transp_median_p_visit.append(np.nan)
                 transp_stddev_p_visit.append(np.nan)
                 
-        ''' insert into qaDB '''
+        # insert into qaDB
         df = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
                   'transparency_mean': transp_mean_p_visit,
@@ -391,7 +449,7 @@ class Condition(object):
                 ag_background_median_p_visit.append(np.nan)
                 ag_background_stddev_p_visit.append(np.nan)
                 
-        ''' insert into qaDB '''
+        # insert into qaDB
         df = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
                   'ag_background_mean': ag_background_mean_p_visit,
@@ -427,7 +485,7 @@ class Condition(object):
         ----------
 
         """
-        ''' setup butler '''
+        # setup butler
         _drpDataConf = self.conf["drp"]["data"]
         baseDir = _drpDataConf["base"]
         pfsConfigDir = _drpDataConf["pfsConfigDir"]
@@ -441,7 +499,7 @@ class Condition(object):
 
         _skyQaConf = self.conf["qa"]["sky"]["config"]
             
-        ''' get visit information '''
+        # get visit information
         self.df, _ = self.getSpsExposure()
         pfs_visit_id = self.df['pfs_visit_id'].astype(int)
         sps_camera_ids = self.df['sps_camera_id']
@@ -480,7 +538,7 @@ class Condition(object):
                     pfsArm = None
                     _pfsDesignId = None
                     pfsConfig = None
-            ''' calculate the typical sky background level '''           
+            # calculate the typical sky background level
             logger.info("calculating sky background level...")
             if pfsArm is not None:
                 pfsArmSky = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.SKY)
@@ -523,7 +581,7 @@ class Condition(object):
             )
         self.qadb.populateQATable('noise', df2)
 
-        ''' plotting '''
+        # plotting
         if plot is True:
             fig = plt.figure(figsize=(8, 5))
             axe = fig.add_subplot()
@@ -809,6 +867,7 @@ class Condition(object):
             self.plotTransparency(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotAgBackground(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotGuideError(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
+
     def fetch_visit(self, visitStart, visitEnd=None):
         if visitEnd is None:
             sqlWhere = f'pfs_visit_id>={visitStart}'

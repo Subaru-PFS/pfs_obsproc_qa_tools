@@ -5,10 +5,13 @@ import numpy as np
 import pandas as pd
 import toml
 
+from .opDB import OpDB
+from .qaDB import QaDB
+
 TEXP_NOMINAL = 900.0         # sec.
 SEEING_NOMINAL = 0.80        # arcsec
 TRANSPARENCY_NOMINAL = 0.90  # 
-NOISE_LEVEL_NOMINAL = 40.0   # ADU?
+NOISE_LEVEL_NOMINAL = 10.0   # ADU?
 
 class ExposureTime(object):
     """Exposure Time
@@ -33,17 +36,27 @@ class ExposureTime(object):
 
         (2) faint objects compared to sky background
 
-            t_eff = t_nominal / (N_sky,obs/N_sky,nom) x (\\xi_obs/\\xi_nom)^2 x (\\eta_obs/\\eta_nom)^2
-
-    Parameters
-    ----------
-    object_faintness : `int` (0=bright, 1=faint, default=1)
-
-    Examples
-    ----------
+            t_eff = t_nominal x (N_sky,nom/N_sky,obs) x (\\xi_obs/\\xi_nom)^2 x (\\eta_obs/\\eta_nom)^2
+                or
+            t_eff = t_nominal x (sigma_sky,nom/sigma_sky,obs)^2 x (\\xi_obs/\\xi_nom)^2 x (\\eta_obs/\\eta_nom)^2
 
     """
     def __init__(self, object_faintness=1):
+        """        
+        Parameters
+        ----------
+            object_faintness : `int` (0=bright, 1=faint, default=1)
+        
+        Returns
+        ----------
+            config: return of toml.load
+        
+        Examples
+        ----------
+
+        """
+
+        # nominal values etc.
         self.TEXP_NOMINAL = TEXP_NOMINAL
         self.SEEING_NOMINAL = SEEING_NOMINAL
         self.TRANSPARENCY_NOMINAL = TRANSPARENCY_NOMINAL
@@ -51,15 +64,47 @@ class ExposureTime(object):
         self.object_faintness = object_faintness
         self.df_fae = self.getFiberApertureEffectModel()
 
+        # database config
+        self.opdb = OpDB(self.conf["db"]["opdb"])
+        self.qadb = QaDB(self.conf["db"]["qadb"])
+
     def getFiberApertureEffectModel(self):
         df = pd.read_csv(os.path.join(__file__.split('utils')[0], 'data/fiber_aperture_effect.csv'))
         return df
     
     def calcFiberApertureEffect(self, seeing):
+        """        
+        Parameters
+        ----------
+            seeing : `float` seeing FWHM in arcsec.
+
+        Returns
+        ----------
+            fae: fiber aperture effect (fraction of flux covered by the fiber aperture)
+
+        Examples
+        ----------
+
+        """
         fae = np.interp(seeing, self.df_fae['fwhm'], self.df_fae['ap_eff_moffat'])
         return fae
     
     def calcEffectiveExposureTime(self, seeing, transparency, noise_level):
+        """        
+        Parameters
+        ----------
+            seeing : `float` seeing FWHM in arcsec.
+            transparency : `float` transparency
+            noise_level : `float` sky-background noise_level
+
+        Returns
+        ----------
+            t_eff: `float` effective exposure time 
+
+        Examples
+        ----------
+
+        """
         xi = self.calcFiberApertureEffect(seeing) / self.calcFiberApertureEffect(self.SEEING_NOMINAL)
         eta = transparency / self.TRANSPARENCY_NOMINAL
         noise = noise_level / self.NOISE_LEVEL_NOMINAL
@@ -69,7 +114,7 @@ class ExposureTime(object):
             t_eff = self.TEXP_NOMINAL * xi * eta
         else:
             # object is faint (so background limited)
-            t_eff = self.TEXP_NOMINAL / noise * xi**2 * eta**2
+            t_eff = self.TEXP_NOMINAL / noise**2 * xi**2 * eta**2
 
         return t_eff
 
