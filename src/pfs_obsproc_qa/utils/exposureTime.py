@@ -92,7 +92,41 @@ class ExposureTime(object):
         self.opdb = OpDB(self.conf["db"]["opdb"])
         self.qadb = QaDB(self.conf["db"]["qadb"])
 
+    def getNominalExposureTime(self, visit):
+        """        
+        Parameters
+        ----------
+            visit : `int` pfs_visit_id
+
+        Returns
+        ----------
+            t_nominal: `float` (nominal exposure time in sec.)
+
+        Examples
+        ----------
+
+        """
+        sqlWhere = f"sps_exposure.pfs_visit_id={visit}"
+        sqlCmd = f"SELECT * FROM sps_exposure WHERE {sqlWhere};"
+        df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
+        self.t_nominal = np.nanmean(df["exptime"])
+        return self.t_nominal
+    
     def getFiberApertureEffectModel(self):
+        """ Read csv file of the fiber aperture effect
+        The file contains the fraction of light flux covered by the fiber aperture as a function of seeing FWHM in arcsec.
+
+        Parameters
+        ----------
+
+        Returns
+        ----------
+            df: DataFrame of fiber aperture effect
+
+        Examples
+        ----------
+
+        """
         df = pd.read_csv(os.path.join(__file__.split('utils')[0], 'data/fiber_aperture_effect.csv'))
         return df
     
@@ -113,10 +147,11 @@ class ExposureTime(object):
         fae = np.interp(seeing, self.df_fae['fwhm'], self.df_fae['ap_eff_moffat'])
         return fae
     
-    def calcEffectiveExposureTime(self, seeing, transparency, noise_level):
+    def calcEffectiveExposureTime(self, visit, seeing, transparency, noise_level):
         """        
         Parameters
         ----------
+            visit : `int` pfs_visit_id
             seeing : `float` seeing FWHM in arcsec.
             transparency : `float` transparency
             noise_level : `float` sky-background noise_level
@@ -129,16 +164,26 @@ class ExposureTime(object):
         ----------
 
         """
+        # calculate the relative change of the observing conditions
         xi = self.calcFiberApertureEffect(seeing) / self.calcFiberApertureEffect(self.SEEING_NOMINAL)
         eta = transparency / self.TRANSPARENCY_NOMINAL
         noise = noise_level / self.NOISE_LEVEL_NOMINAL
         
+        # calculate the effective exposure time
         if self.object_faintness == 0:
             # object is bright (so object limited)
-            t_eff = self.TEXP_NOMINAL * xi * eta
+            self.t_effective = self.TEXP_NOMINAL * xi * eta
         else:
             # object is faint (so background limited)
-            t_eff = self.TEXP_NOMINAL / noise**2 * xi**2 * eta**2
+            self.t_effective = self.TEXP_NOMINAL / noise**2 * xi**2 * eta**2
 
-        return t_eff
+        # insert into qaDB
+        df = pd.DataFrame(
+            data={"pfs_visit_id": [visit],
+                  "nominal_exposure_time": [self.t_nominal],
+                  "effective_exposure_time": [self.t_effective]
+                  })
+        self.qadb.populateQATable('exposure_time', df)
+
+        return self.t_effective
 
