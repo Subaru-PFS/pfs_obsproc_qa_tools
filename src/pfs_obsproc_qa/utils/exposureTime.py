@@ -7,6 +7,7 @@ import toml
 
 from .opDB import OpDB
 from .qaDB import QaDB
+from .utils import read_conf
 
 TEXP_NOMINAL = 900.0         # sec.
 SEEING_NOMINAL = 0.80        # arcsec
@@ -14,24 +15,6 @@ TRANSPARENCY_NOMINAL = 0.90  #
 NOISE_LEVEL_NOMINAL = 10.0   # ADU?
 
 __all__ = ["ExposureTime"]
-
-
-def read_conf(conf):
-    """
-    Parameters
-    ----------
-        conf: `str` config toml filepath (default: config.toml)
-    
-    Returns
-    ----------
-        config: return of toml.load
-    
-    Examples
-    ----------
-
-    """
-    config = toml.load(conf)
-    return config
 
 class ExposureTime(object):
     """Exposure Time

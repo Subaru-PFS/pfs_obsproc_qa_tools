@@ -9,28 +9,11 @@ from pfs.datamodel import Identity, PfsArm
 from pfs.datamodel.pfsConfig import PfsConfig, TargetType
 from .opDB import OpDB
 from .qaDB import QaDB
+from .utils import read_conf
 import logzero
 from logzero import logger
 
 __all__ = ["Condition"]
-
-
-def read_conf(conf):
-    """
-    Parameters
-    ----------
-        conf: `str` config toml filepath (default: config.toml)
-    
-    Returns
-    ----------
-        config: return of toml.load
-    
-    Examples
-    ----------
-
-    """
-    config = toml.load(conf)
-    return config
 
 
 class Condition(object):
