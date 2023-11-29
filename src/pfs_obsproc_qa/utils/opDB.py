@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from sqlalchemy import create_engine
+import pandas as pd
 from logzero import logger
 
 
@@ -25,3 +26,7 @@ class OpDB(object):
         self.conf = conf
         self._engine = create_engine(get_url(self.conf))
         self._conn = self._engine.raw_connection()
+
+    def query(self, sqlCmd):
+        df = pd.read_sql(sql=sqlCmd, con=self._conn)
+        return df

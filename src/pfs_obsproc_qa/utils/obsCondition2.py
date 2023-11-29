@@ -61,7 +61,7 @@ class Condition(object):
         self.df_noise_stats_pv = None
 
         logzero.logfile(self.conf['logger']['logfile'], disableStderrLogger=True)
-        
+       
     def getAgcData(self, visit):
         """ Get AGC data information
 

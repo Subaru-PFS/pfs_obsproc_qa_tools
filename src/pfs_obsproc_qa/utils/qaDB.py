@@ -31,6 +31,10 @@ class QaDB(object):
         self._engine = create_engine(get_url(self.conf))
         self._conn = self._engine.raw_connection()
 
+    def query(self, sqlCmd):
+        df = pd.read_sql(sql=sqlCmd, con=self._conn)
+        return df
+
     def populateQATable(self, tableName, df):
         ''' FIXME (this is not a smart way...) '''
         for idx, data in df.iterrows():
