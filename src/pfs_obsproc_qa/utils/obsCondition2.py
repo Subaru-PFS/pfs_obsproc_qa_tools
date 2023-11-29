@@ -449,7 +449,6 @@ class Condition(object):
                 ag_background_median_p_visit.append(np.nan)
                 ag_background_stddev_p_visit.append(np.nan)
                 
-        # insert into qaDB
         df = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
                   'ag_background_mean': ag_background_mean_p_visit,
@@ -458,15 +457,14 @@ class Condition(object):
                   }
             )
         df = df.fillna(-1).astype(float)
-        #self.qadb.populateQATable('ag_background', df)
-        if self.df_ag_background_stats_pv is None:
-            self.df_ag_background_stats_pv = df.copy()
-        else:
-            self.df_ag_background_stats_pv = pd.concat([self.df_ag_background_stats_pv, df], ignore_index=True)
+        self.df_ag_background_stats_pv = df.copy()
+        #if self.df_ag_background_stats_pv is None:
+        #    self.df_ag_background_stats_pv = df.copy()
+        #else:
+        #    self.df_ag_background_stats_pv = pd.concat([self.df_ag_background_stats_pv, df], ignore_index=True)
 
 
-
-    def calcSkyBackground(self, plot=False):
+    def calcSkyBackground(self, visit, plot=False):
         """Calculate Sky Backroung level based on SKY fibers flux
 
         Parameters
@@ -500,7 +498,7 @@ class Condition(object):
         _skyQaConf = self.conf["qa"]["sky"]["config"]
             
         # get visit information
-        self.df, _ = self.getSpsExposure()
+        self.df = self.getSpsExposure(visit=visit)
         pfs_visit_id = self.df['pfs_visit_id'].astype(int)
         sps_camera_ids = self.df['sps_camera_id']
         exptimes = self.df['exptime']
@@ -508,7 +506,7 @@ class Condition(object):
         obstime = obstime.tz_localize('US/Hawaii')
         obstime = obstime.tz_convert('UTC')
         obsdate = obstime.date().strftime('%Y-%m-%d')
-        
+
         visit_p_visit = []
         sky_mean_p_visit = []    # calculate background level (mean over fibers) per visit
         sky_median_p_visit = []  # calculate background level (median over fibers) per visit
@@ -516,6 +514,9 @@ class Condition(object):
         noise_mean_p_visit = []  # calculate noise level (mean over fibers) per visit
         noise_median_p_visit = []  # calculate noise level (median over fibers) per visit
         noise_stddev_p_visit = []  # calculate noise level (stddev over fibers) per visit
+        agc_bg_mean_p_visit = []    # calculate AGC background level (mean over fibers) per visit
+        agc_bg_median_p_visit = []  # calculate AGC background level (median over fibers) per visit
+        agc_bg_stddev_p_visit = []  # calculate AGC background level (stddev over fibers) per visit
 
         for v in np.unique(pfs_visit_id):
             if butler is not None:
@@ -538,6 +539,9 @@ class Condition(object):
                     pfsArm = None
                     _pfsDesignId = None
                     pfsConfig = None
+            # get AG background level
+            self.calcAgBackground(visit=v)
+
             # calculate the typical sky background level
             logger.info("calculating sky background level...")
             if pfsArm is not None:
@@ -562,12 +566,16 @@ class Condition(object):
                 noise_stddev_p_visit.append(noise.std(skipna=True))
             else:
                 logger.info(f'visit={v} skipped...')
+
         df1 = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
                   'sky_background_mean': sky_mean_p_visit,
                   'sky_background_median': sky_median_p_visit,
                   'sky_background_sigma': sky_stddev_p_visit,
-                  'wavelength_ref': [_skyQaConf["ref_wav_sky"] for _ in visit_p_visit]
+                  'wavelength_ref': [_skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                  'agc_background_mean': self.df_ag_background_stats_pv['ag_background_mean'].values,
+                  'agc_background_median': self.df_ag_background_stats_pv['ag_background_median'].values,
+                  'agc_background_sigma': self.df_ag_background_stats_pv['ag_background_sigma'].values,
                   }
             )
         self.qadb.populateQATable('sky', df1)
@@ -853,12 +861,16 @@ class Condition(object):
         """
         for visit in visits:
             if visit not in self.visitList:
+                # get seeing
                 self.calcSeeing(visit=visit)
+                # get transparency
                 self.calcTransparency(visit=visit)
-                self.calcAgBackground(visit=visit)
-                self.visitList.append(visit)
                 # getGuideOffset
                 self.getGuideError(visit=visit)
+                # get background level
+                self.calcSkyBackground(visit=visit)
+                # append visit
+                self.visitList.append(visit)
             else:
                 logger.warning(f"already calculated for visit={visit}...")
                 pass
