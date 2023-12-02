@@ -60,6 +60,8 @@ class Condition(object):
         self.df_ag_background_stats_pv = None
         self.df_noise_stats_pv = None
 
+        self.skyQaConf = self.conf["qa"]["sky"]["config"]
+
         logzero.logfile(self.conf['logger']['logfile'], disableStderrLogger=True)
        
     def getAgcData(self, visit):
@@ -139,7 +141,7 @@ class Condition(object):
         ----------
 
         """
-
+        logger.info(f"calculating seeing for visit={visit}...")
 
         # get information from agc_data table
         df = self.getAgcData(visit)
@@ -229,6 +231,7 @@ class Condition(object):
                   'seeing_mean': fwhm_mean_p_visit,
                   'seeing_median': fwhm_median_p_visit,
                   'seeing_sigma': fwhm_stddev_p_visit,
+                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
                   },
             
                   )
@@ -253,6 +256,8 @@ class Condition(object):
         ----------
 
         """
+        logger.info(f"calculating sky transparency for visit={visit}...")
+
         df = self.getAgcData(visit)
 
         agc_exposure_id = df['agc_exposure_id']
@@ -335,7 +340,8 @@ class Condition(object):
             data={'pfs_visit_id': visit_p_visit,
                   'transparency_mean': transp_mean_p_visit,
                   'transparency_median': transp_median_p_visit,
-                  'transparency_sigma': transp_stddev_p_visit
+                  'transparency_sigma': transp_stddev_p_visit,
+                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
                   }
             )
         df = df.fillna(-1).astype(float)
@@ -447,20 +453,15 @@ class Condition(object):
         #    self.df_ag_background_stats_pv = pd.concat([self.df_ag_background_stats_pv, df], ignore_index=True)
 
 
-    def calcSkyBackground(self, visit, plot=False):
-        """Calculate Sky Backroung level based on SKY fibers flux
+    def calcSkyBackground(self, visit):
+        """Calculate Sky background level based on SKY fibers flux and AG background level
 
         Parameters
         ----------
-            plot : plot the results? {True, False}       (default: False)
-            butler: (default: None)
+            visit : pfs_visit_id
             
         Returns
         ----------
-            pfs_visit_id : pfs_visit_id
-            sky_flux_mean : The mean flux of SKY fibers
-            sky_flux_mean : The mean flux of SKY fibers
-            sky_flux_mean : The mean flux of SKY fibers
             
         Examples
         ----------
@@ -477,9 +478,7 @@ class Condition(object):
             butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
         except:
             butler = None
-
-        _skyQaConf = self.conf["qa"]["sky"]["config"]
-            
+          
         # get visit information
         self.df = self.getSpsExposure(visit=visit)
         pfs_visit_id = self.df['pfs_visit_id'].astype(int)
@@ -503,15 +502,15 @@ class Condition(object):
 
         for v in np.unique(pfs_visit_id):
             if butler is not None:
-                dataId = dict(visit=v, spectrograph=_skyQaConf["ref_spectrograph_sky"], arm=_skyQaConf["ref_arm_sky"],
+                dataId = dict(visit=v, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
                 )
                 pfsArm = butler.get("pfsArm", dataId)
                 pfsConfig = butler.get("pfsConfig", dataId)
             else:
                 _dataDir = os.path.join(rerun, 'pfsArm', obsdate, 'v%06d' % (v))
                 _identity = Identity(visit=v, 
-                                     arm=_skyQaConf["ref_arm_sky"],
-                                     spectrograph=_skyQaConf["ref_spectrograph_sky"]
+                                     arm=self.skyQaConf["ref_arm_sky"],
+                                     spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
                     pfsArm = PfsArm.read(_identity, dirName=_dataDir)
@@ -526,14 +525,14 @@ class Condition(object):
             self.calcAgBackground(visit=v)
 
             # calculate the typical sky background level
-            logger.info("calculating sky background level...")
+            logger.info(f"calculating sky background level for visit={v}...")
             if pfsArm is not None:
                 pfsArmSky = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.SKY)
                 data1 = []
                 data2 = []
                 for wav, flx in zip(pfsArmSky.wavelength, pfsArmSky.flux):
-                    wc = _skyQaConf["ref_wav_sky"]
-                    dw = _skyQaConf["ref_dwav_sky"]
+                    wc = self.skyQaConf["ref_wav_sky"]
+                    dw = self.skyQaConf["ref_dwav_sky"]
                     msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
                     data1.append(np.nanmedian(flx[msk]))
                     data2.append(np.nanstd(flx[msk]))
@@ -550,67 +549,132 @@ class Condition(object):
             else:
                 logger.info(f'visit={v} skipped...')
 
+        # populate database (sky table)
         df1 = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
                   'sky_background_mean': sky_mean_p_visit,
                   'sky_background_median': sky_median_p_visit,
                   'sky_background_sigma': sky_stddev_p_visit,
-                  'wavelength_ref': [_skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
                   'agc_background_mean': self.df_ag_background_stats_pv['ag_background_mean'].values,
                   'agc_background_median': self.df_ag_background_stats_pv['ag_background_median'].values,
                   'agc_background_sigma': self.df_ag_background_stats_pv['ag_background_sigma'].values,
                   }
             )
         self.qadb.populateQATable('sky', df1)
+        if self.df_sky_background is None:
+            self.df_sky_background = df1.copy()
+        else:
+            self.df_sky_background = pd.concat([self.df_sky_background, df1], ignore_index=True)
 
+        # populate database (noise table)
         df2 = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
                   'noise_mean': noise_mean_p_visit,
                   'noise_median': noise_median_p_visit,
                   'noise_sigma': noise_stddev_p_visit,
+                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
                   }
             )
         self.qadb.populateQATable('noise', df2)
+        if self.df_sky_noise is None:
+            self.df_sky_noise = df2.copy()
+        else:
+            self.df_sky_noise = pd.concat([self.df_sky_noise, df2], ignore_index=True)
 
-        # plotting
-        if plot is True:
-            fig = plt.figure(figsize=(8, 5))
-            axe = fig.add_subplot()
-            # axe.set_xlabel('taken_at (HST)')
-            axe.set_xlabel('pfs_visit_id')
-            axe.set_ylabel(r'sky background level (ADU)')
-            axe.set_title(f'sky background statistics')
-            #axe.set_ylim(0., 2.0)
-            axe.plot(df1['pfs_visit_id'], df1['sky_background_mean'],
-                     ls='solid', lw=2, color='C0', alpha=0.8, 
-                     label='mean')
-            axe.plot(df1['pfs_visit_id'], df1['sky_background_median'],
-                     ls='solid', lw=2, color='C1', alpha=0.8, 
-                     label='median')
-            axe.plot(df1['pfs_visit_id'], df1['sky_background_sigma'],
-                     ls='solid', lw=2, color='C2', alpha=0.8, 
-                     label='sigma')
-            axe.legend(loc='upper left', ncol=1, fontsize=8)
-            plt.show()
+    def calcThroughput(self, visit):
+        """Calculate total throughput based on FLUXSTD fibers flux
 
-            fig = plt.figure(figsize=(8, 5))
-            axe = fig.add_subplot()
-            # axe.set_xlabel('taken_at (HST)')
-            axe.set_xlabel('pfs_visit_id')
-            axe.set_ylabel(r'noise level (ADU)')
-            axe.set_title(f'sky background noise statistics')
-            #axe.set_ylim(0., 2.0)
-            axe.plot(df2['pfs_visit_id'], df2['noise_mean'],
-                     ls='solid', lw=2, color='C0', alpha=0.8, 
-                     label='mean')
-            axe.plot(df2['pfs_visit_id'], df2['noise_median'],
-                     ls='solid', lw=2, color='C1', alpha=0.8, 
-                     label='median')
-            axe.plot(df2['pfs_visit_id'], df2['noise_sigma'],
-                     ls='solid', lw=2, color='C2', alpha=0.8, 
-                     label='sigma')
-            axe.legend(loc='upper left', ncol=1, fontsize=8)
-            plt.show()
+        Parameters
+        ----------
+            visit : pfs_visit_id
+            
+        Returns
+        ----------
+            
+        Examples
+        ----------
+
+        """
+        # setup butler
+        _drpDataConf = self.conf["drp"]["data"]
+        baseDir = _drpDataConf["base"]
+        pfsConfigDir = _drpDataConf["pfsConfigDir"]
+        rerun = os.path.join(baseDir, 'rerun', _drpDataConf["rerun"])
+        calibRoot = os.path.join(baseDir, _drpDataConf["calib"])
+        try:
+            import lsst.daf.persistence as dafPersist
+            butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
+        except:
+            butler = None
+          
+        # get visit information
+        self.df = self.getSpsExposure(visit=visit)
+        pfs_visit_id = self.df['pfs_visit_id'].astype(int)
+        sps_camera_ids = self.df['sps_camera_id']
+        exptimes = self.df['exptime']
+        obstime = self.df['time_exp_end'][0]
+        obstime = obstime.tz_localize('US/Hawaii')
+        obstime = obstime.tz_convert('UTC')
+        obsdate = obstime.date().strftime('%Y-%m-%d')
+
+        visit_p_visit = []
+        sky_mean_p_visit = []    # calculate background level (mean over fibers) per visit
+        sky_median_p_visit = []  # calculate background level (median over fibers) per visit
+        sky_stddev_p_visit = []  # calculate background level (stddev over fibers) per visit
+        noise_mean_p_visit = []  # calculate noise level (mean over fibers) per visit
+        noise_median_p_visit = []  # calculate noise level (median over fibers) per visit
+        noise_stddev_p_visit = []  # calculate noise level (stddev over fibers) per visit
+        agc_bg_mean_p_visit = []    # calculate AGC background level (mean over fibers) per visit
+        agc_bg_median_p_visit = []  # calculate AGC background level (median over fibers) per visit
+        agc_bg_stddev_p_visit = []  # calculate AGC background level (stddev over fibers) per visit
+
+        for v in np.unique(pfs_visit_id):
+            if butler is not None:
+                dataId = dict(visit=v, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
+                )
+                pfsArm = butler.get("pfsArm", dataId)
+                pfsConfig = butler.get("pfsConfig", dataId)
+            else:
+                _dataDir = os.path.join(rerun, 'pfsArm', obsdate, 'v%06d' % (v))
+                _identity = Identity(visit=v, 
+                                     arm=self.skyQaConf["ref_arm_sky"],
+                                     spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                     )
+                try:
+                    pfsArm = PfsArm.read(_identity, dirName=_dataDir)
+                    _pfsDesignId = pfsArm.identity._pfsDesignId
+                    pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v, 
+                                            dirName=os.path.join(pfsConfigDir, obsdate))
+                except:
+                    pfsArm = None
+                    _pfsDesignId = None
+                    pfsConfig = None
+
+            # calculate the typical sky background level
+            logger.info(f"calculating throughput for visit={v}...")
+            if pfsArm is not None:
+                pfsArmFluxstd = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                data1 = []
+                data2 = []
+                for wav, flx in zip(pfsArmFluxstd.wavelength, pfsArmFluxstd.flux):
+                    wc = self.skyQaConf["ref_wav_sky"]
+                    dw = self.skyQaConf["ref_dwav_sky"]
+                    msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
+                    data1.append(np.nanmedian(flx[msk]))
+                    data2.append(np.nanstd(flx[msk]))
+                df = pd.DataFrame(data={'sky_level': data1, 'noise_level': data2})
+                sky = df['sky_level']
+                noise = df['noise_level']
+                visit_p_visit.append(v)
+                sky_mean_p_visit.append(sky.mean(skipna=True))
+                sky_median_p_visit.append(sky.median(skipna=True))
+                sky_stddev_p_visit.append(sky.std(skipna=True))
+                noise_mean_p_visit.append(noise.mean(skipna=True))
+                noise_median_p_visit.append(noise.median(skipna=True))
+                noise_stddev_p_visit.append(noise.std(skipna=True))
+            else:
+                logger.info(f'visit={v} skipped...')
 
     def plotSeeing(self, cc='cameraId', xaxis='taken_at', saveFig=False, figName='', dirName=None):
         if self.df_seeing is not None:
@@ -715,7 +779,7 @@ class Condition(object):
                 fig = plt.figure(figsize=(8, 5))
                 axe = fig.add_subplot()
                 axe.set_xlabel('taken_at (HST)')
-                axe.set_ylabel(r'background')
+                axe.set_ylabel(r'AG background')
                 axe.set_title(f'visits:{min(self.visitList)}..{max(self.visitList)}')
                 #axe.set_ylim(0., 2.0)
                 if xaxis=='taken_at':
@@ -756,6 +820,27 @@ class Condition(object):
                 if saveFig == True:
                     plt.savefig(os.path.join(dirName, f'{figName}_ag_background.pdf'), bbox_inches='tight')
 
+    def plotSkyBackground(self, saveFig=False, figName='', dirName=None):
+        if self.df_sky_background is not None:
+            if len(self.df_sky_background) > 0:
+                sky_background_visits = self.df_sky_background['pfs_visit_id']
+                sky_background = self.df_sky_background['sky_background_median']
+                sky_noise_visits = self.df_sky_noise['pfs_visit_id']
+                sky_noise = self.df_sky_noise['noise_median']
+                fig = plt.figure(figsize=(8, 5))
+                ax1 = fig.add_subplot(211)
+                ax1.set_ylabel(r'Sky background level')
+                ax1.set_title(f'visits:{min(sky_background_visits)}..{max(sky_background_visits)}')
+                #ax1.scatter(sky_background_visits, sky_background, marker='o', s=10, alpha=0.5, rasterized=True)
+                ax1.plot(sky_background_visits, sky_background, ls='solid', lw=2, color='k', alpha=0.8)
+                ax2 = fig.add_subplot(212)
+                ax2.set_xlabel('pfs_visit_id')
+                ax2.set_ylabel(r'Sky background noise')
+                #ax2.scatter(sky_noise_visits, sky_noise, marker='o', s=10, alpha=0.5, rasterized=True)
+                ax2.plot(sky_noise_visits, sky_noise, ls='solid', lw=2, color='k', alpha=0.8)                
+                plt.show()
+                if saveFig == True:
+                    plt.savefig(os.path.join(dirName, f'{figName}_sky_background.pdf'), bbox_inches='tight')
 
     def plotGuideError(self, cc='cameraId', xaxis='taken_at', saveFig=False, figName='', dirName=None):
         if self.df_guide_error is not None:
@@ -843,15 +928,18 @@ class Condition(object):
         ----------
         """
         for visit in visits:
+            print(f'visit={visit}')
             if visit not in self.visitList:
                 # get seeing
-                self.calcSeeing(visit=visit)
+                #self.calcSeeing(visit=visit)
                 # get transparency
-                self.calcTransparency(visit=visit)
+                #self.calcTransparency(visit=visit)
                 # getGuideOffset
-                self.getGuideError(visit=visit)
+                #self.getGuideError(visit=visit)
                 # get background level
-                self.calcSkyBackground(visit=visit)
+                #self.calcSkyBackground(visit=visit)
+                # get throughput
+                self.calcThroughput(visit=visit)
                 # append visit
                 self.visitList.append(visit)
             else:
@@ -861,6 +949,7 @@ class Condition(object):
             self.plotSeeing(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotTransparency(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotAgBackground(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
+            self.plotSkyBackground(saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotGuideError(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
 
     def fetch_visit(self, visitStart, visitEnd=None):
