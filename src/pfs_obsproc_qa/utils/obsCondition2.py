@@ -50,7 +50,9 @@ class Condition(object):
         self.df_transparency = None
         self.df_ag_background = None
         self.df_sky_background = None
+        self.df_sky_background_stats_pv = None
         self.df_sky_noise = None
+        self.df_sky_noise_stats_pv = None
         self.df_seeing_stats = None
         self.df_transparency_stats = None
         self.df_ag_background_stats = None
@@ -539,9 +541,30 @@ class Condition(object):
                     data1.append(np.nanmedian(flx[msk]))
                     data2.append(np.nanstd(flx[msk]))
                 logger.info(f"{len(data1)} SKYs are used to calculate")
-                df = pd.DataFrame(data={'sky_level': data1, 'noise_level': data2})
-                sky = df['sky_level']
-                noise = df['noise_level']
+                # store info into dataframe
+                df1 = pd.DataFrame(
+                    data={'pfs_visit_id': [v for _ in range(len(pfsArmSky))],
+                        'fiber_id': pfsArmSky.fiberId,
+                        'background_level': data1,
+                        }
+                    )
+                if self.df_sky_background is None:
+                    self.df_sky_background = df1.copy()
+                else:
+                    self.df_sky_background = pd.concat([self.df_sky_background, df1.copy()], ignore_index=True)
+
+                df2 = pd.DataFrame(
+                    data={'pfs_visit_id': [v for _ in range(len(pfsArmSky))],
+                        'fiber_id': pfsArmSky.fiberId,
+                        'noise_level': data2,
+                        }
+                    )
+                if self.df_sky_noise is None:
+                    self.df_sky_noise = df2.copy()
+                else:
+                    self.df_sky_noise = pd.concat([self.df_sky_noise, df2.copy()], ignore_index=True)
+                sky = df1['background_level']
+                noise = df2['noise_level']
                 visit_p_visit.append(v)
                 sky_mean_p_visit.append(sky.mean(skipna=True))
                 sky_median_p_visit.append(sky.median(skipna=True))
@@ -565,10 +588,10 @@ class Condition(object):
                   }
             )
         self.qadb.populateQATable('sky', df1)
-        if self.df_sky_background is None:
-            self.df_sky_background = df1.copy()
+        if self.df_sky_background_stats_pv is None:
+            self.df_sky_background_stats_pv = df1.copy()
         else:
-            self.df_sky_background = pd.concat([self.df_sky_background, df1], ignore_index=True)
+            self.df_sky_background_stats_pv = pd.concat([self.df_sky_background_stats_pv, df1.copy()], ignore_index=True)
 
         # populate database (noise table)
         df2 = pd.DataFrame(
@@ -580,10 +603,10 @@ class Condition(object):
                   }
             )
         self.qadb.populateQATable('noise', df2)
-        if self.df_sky_noise is None:
-            self.df_sky_noise = df2.copy()
+        if self.df_sky_noise_stats_pv is None:
+            self.df_sky_noise_stats_pv = df2.copy()
         else:
-            self.df_sky_noise = pd.concat([self.df_sky_noise, df2], ignore_index=True)
+            self.df_sky_noise_stats_pv = pd.concat([self.df_sky_noise_stats_pv, df2.copy()], ignore_index=True)
 
     def calcThroughput(self, visit):
         """Calculate total throughput based on FLUXSTD fibers flux
@@ -849,12 +872,12 @@ class Condition(object):
                     plt.savefig(os.path.join(dirName, f'{figName}_ag_background.pdf'), bbox_inches='tight')
 
     def plotSkyBackground(self, saveFig=False, figName='', dirName=None):
-        if self.df_sky_background is not None:
-            if len(self.df_sky_background) > 0:
-                sky_background_visits = self.df_sky_background['pfs_visit_id']
-                sky_background = self.df_sky_background['sky_background_median']
-                sky_noise_visits = self.df_sky_noise['pfs_visit_id']
-                sky_noise = self.df_sky_noise['noise_median']
+        if self.df_sky_background_stats_pv is not None:
+            if len(self.df_sky_background_stats_pv) > 0:
+                sky_background_visits = self.df_sky_background_stats_pv['pfs_visit_id']
+                sky_background = self.df_sky_background_stats_pv['sky_background_median']
+                sky_noise_visits = self.df_sky_noise_stats_pv['pfs_visit_id']
+                sky_noise = self.df_sky_noise_stats_pv['noise_median']
                 fig = plt.figure(figsize=(8, 5))
                 ax1 = fig.add_subplot(211)
                 ax1.set_ylabel(r'Sky background level')
