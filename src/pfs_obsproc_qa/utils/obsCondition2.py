@@ -538,6 +538,7 @@ class Condition(object):
                     msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
                     data1.append(np.nanmedian(flx[msk]))
                     data2.append(np.nanstd(flx[msk]))
+                logger.info(f"{len(data1)} SKYs are used to calculate")
                 df = pd.DataFrame(data={'sky_level': data1, 'noise_level': data2})
                 sky = df['sky_level']
                 noise = df['noise_level']
@@ -669,6 +670,7 @@ class Condition(object):
                     dw = self.skyQaConf["ref_dwav_sky"]
                     msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
                     throughput.append(np.nanmedian(flx[msk]) / psfFlux * 50)
+                logger.info(f"{len(throughput)} FLUXSTDs are used to calculate")
                 visit_p_visit.append(v)
                 throughput_mean_p_visit.append(np.nanmean(throughput))
                 throughput_median_p_visit.append(np.nanmedian(throughput))
