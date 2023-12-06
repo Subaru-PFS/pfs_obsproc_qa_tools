@@ -7,6 +7,7 @@ import toml
 import matplotlib.pyplot as plt
 from pfs.datamodel import Identity, PfsArm, PfsMerged
 from pfs.datamodel.pfsConfig import PfsConfig, TargetType
+from pfs.datamodel.pfsFluxReference import PfsFluxReference
 from .opDB import OpDB
 from .qaDB import QaDB
 from .utils import read_conf
@@ -624,7 +625,7 @@ class Condition(object):
         else:
             self.df_sky_noise_stats_pv = pd.concat([self.df_sky_noise_stats_pv, df2.copy()], ignore_index=True)
 
-    def calcThroughput(self, visit, usePfsMerged=True, usePfsFluxReference=False):
+    def calcThroughput(self, visit, usePfsMerged=True, usePfsFluxReference=True):
         """Calculate total throughput based on FLUXSTD fibers flux
 
         Parameters
@@ -678,6 +679,7 @@ class Condition(object):
             else:
                 _pfsArmDataDir = os.path.join(rerun, 'pfsArm', obsdate, 'v%06d' % (v))
                 _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged', obsdate, 'v%06d' % (v))
+                _pfsFluxReferenceDataDir = os.path.join(rerun, 'pfsFluxReference', obsdate, 'v%06d' % (v))
 
                 _identity = Identity(visit=v, 
                                      arm=self.skyQaConf["ref_arm_sky"],
@@ -689,11 +691,16 @@ class Condition(object):
                     pfsMerged = PfsMerged.read(_identity, dirName=_pfsMergedDataDir)
                     pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v, 
                                             dirName=os.path.join(pfsConfigDir, obsdate))
+                    if usePfsFluxReference is True:
+                        pfsFluxReference = PfsFluxReference.read(_identity, dirName=_pfsFluxReferenceDataDir)
+                    else:
+                        pfsFluxReference = None
                 except:
                     pfsArm = None
                     pfsMerged = None
                     _pfsDesignId = None
                     pfsConfig = None
+                    pfsFluxReference = None
 
             # calculate the throughput from FLUXSTD spectra
             logger.info(f"calculating throughput for visit={v}...")
@@ -726,11 +733,18 @@ class Condition(object):
             if SpectraFluxstd is not None:                   
                 throughput = []
                 for fid, wav, flx in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux):
-                    psfFlux = pfsConfig[pfsConfig.fiberId==fid].psfFlux[0][idx_psfFlux]
                     wc = self.skyQaConf["ref_wav_sky"]
                     dw = self.skyQaConf["ref_dwav_sky"]
+                    if usePfsFluxReference is True:
+                        wav_pfr = np.array(pfsFluxReference.wavelength.tolist())
+                        flx_pfr = pfsFluxReference.flux[pfsFluxReference.fiberId==fid][0]
+                        msk = (wav_pfr > wc - dw) * (wav_pfr < wc + dw) # FIXME?
+                        refFlux = np.nanmedian(flx_pfr[msk])
+                    else:
+                        refFlux = pfsConfig[pfsConfig.fiberId==fid].psfFlux[0][idx_psfFlux]
+
                     msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
-                    throughput.append(np.nanmedian(flx[msk]) / psfFlux * 5)
+                    throughput.append(np.nanmedian(flx[msk]) / refFlux * 5)
                 logger.info(f"{len(throughput)} FLUXSTDs are used to calculate")
                 visit_p_visit.append(v)
                 throughput_mean_p_visit.append(np.nanmean(throughput))
