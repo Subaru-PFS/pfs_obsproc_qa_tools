@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import toml
 import matplotlib.pyplot as plt
-from pfs.datamodel import Identity, PfsArm
+from pfs.datamodel import Identity, PfsArm, PfsMerged
 from pfs.datamodel.pfsConfig import PfsConfig, TargetType
 from .opDB import OpDB
 from .qaDB import QaDB
@@ -608,7 +608,7 @@ class Condition(object):
         else:
             self.df_sky_noise_stats_pv = pd.concat([self.df_sky_noise_stats_pv, df2.copy()], ignore_index=True)
 
-    def calcThroughput(self, visit):
+    def calcThroughput(self, visit, usePfsMerged=True, usePfsFluxReference=False):
         """Calculate total throughput based on FLUXSTD fibers flux
 
         Parameters
@@ -653,20 +653,29 @@ class Condition(object):
                 dataId = dict(visit=v, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
                 )
                 pfsArm = butler.get("pfsArm", dataId)
+                pfsMerged = butler.get("pfsMerged", dataId)
                 pfsConfig = butler.get("pfsConfig", dataId)
+                if usePfsFluxReference is True:
+                    pfsFluxReference = butler.get("pfsFluxReference", dataId)
+                else:
+                    pfsFluxReference = None
             else:
-                _dataDir = os.path.join(rerun, 'pfsArm', obsdate, 'v%06d' % (v))
+                _pfsArmDataDir = os.path.join(rerun, 'pfsArm', obsdate, 'v%06d' % (v))
+                _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged', obsdate, 'v%06d' % (v))
+
                 _identity = Identity(visit=v, 
                                      arm=self.skyQaConf["ref_arm_sky"],
                                      spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
-                    pfsArm = PfsArm.read(_identity, dirName=_dataDir)
+                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
                     _pfsDesignId = pfsArm.identity._pfsDesignId
+                    pfsMerged = PfsMerged.read(_identity, dirName=_pfsMergedDataDir)
                     pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v, 
                                             dirName=os.path.join(pfsConfigDir, obsdate))
                 except:
                     pfsArm = None
+                    pfsMerged = None
                     _pfsDesignId = None
                     pfsConfig = None
 
@@ -684,33 +693,65 @@ class Condition(object):
                 idx_psfFlux = 3
             else:
                 idx_psfFlux = 4
-            if pfsArm is not None:
-                pfsArmFluxstd = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
-                throughput = []
-                for fid, wav, flx in zip(pfsArmFluxstd.fiberId, pfsArmFluxstd.wavelength, pfsArmFluxstd.flux):
-                    psfFlux = pfsConfig[pfsConfig.fiberId==fid].psfFlux[0][idx_psfFlux]
-                    wc = self.skyQaConf["ref_wav_sky"]
-                    dw = self.skyQaConf["ref_dwav_sky"]
-                    msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
-                    throughput.append(np.nanmedian(flx[msk]) / psfFlux * 50)
-                logger.info(f"{len(throughput)} FLUXSTDs are used to calculate")
-                visit_p_visit.append(v)
-                throughput_mean_p_visit.append(np.nanmean(throughput))
-                throughput_median_p_visit.append(np.nanmedian(throughput))
-                throughput_stddev_p_visit.append(np.nanstd(throughput))
-                # store info into dataframe
-                df = pd.DataFrame(
-                    data={'pfs_visit_id': [v for _ in range(len(pfsArmFluxstd))],
-                        'fiber_id': pfsArmFluxstd.fiberId,
-                        'throughput': throughput,
-                        }
-                    )
-                if self.df_throughput is None:
-                    self.df_throughput = df.copy()
+            
+            if usePfsMerged is True:
+                logger.info(f"pfsMerged is used")
+                if pfsMerged is not None:
+                    pfsMergedFluxstd = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                    throughput = []
+                    for fid, wav, flx in zip(pfsMergedFluxstd.fiberId, pfsMergedFluxstd.wavelength, pfsMergedFluxstd.flux):
+                        psfFlux = pfsConfig[pfsConfig.fiberId==fid].psfFlux[0][idx_psfFlux]
+                        wc = self.skyQaConf["ref_wav_sky"]
+                        dw = self.skyQaConf["ref_dwav_sky"]
+                        msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
+                        throughput.append(np.nanmedian(flx[msk]) / psfFlux * 5)
+                    logger.info(f"{len(throughput)} FLUXSTDs are used to calculate")
+                    visit_p_visit.append(v)
+                    throughput_mean_p_visit.append(np.nanmean(throughput))
+                    throughput_median_p_visit.append(np.nanmedian(throughput))
+                    throughput_stddev_p_visit.append(np.nanstd(throughput))
+                    # store info into dataframe
+                    df = pd.DataFrame(
+                        data={'pfs_visit_id': [v for _ in range(len(pfsMergedFluxstd))],
+                            'fiber_id': pfsMergedFluxstd.fiberId,
+                            'throughput': throughput,
+                            }
+                        )
+                    if self.df_throughput is None:
+                        self.df_throughput = df.copy()
+                    else:
+                        self.df_throughput = pd.concat([self.df_throughput, df], ignore_index=True)
                 else:
-                    self.df_throughput = pd.concat([self.df_throughput, df], ignore_index=True)
+                    logger.info(f'visit={v} skipped...')
             else:
-                logger.info(f'visit={v} skipped...')
+                logger.info(f"pfsArm is used")
+                if pfsArm is not None:
+                    pfsArmFluxstd = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                    throughput = []
+                    for fid, wav, flx in zip(pfsArmFluxstd.fiberId, pfsArmFluxstd.wavelength, pfsArmFluxstd.flux):
+                        psfFlux = pfsConfig[pfsConfig.fiberId==fid].psfFlux[0][idx_psfFlux]
+                        wc = self.skyQaConf["ref_wav_sky"]
+                        dw = self.skyQaConf["ref_dwav_sky"]
+                        msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
+                        throughput.append(np.nanmedian(flx[msk]) / psfFlux * 50)
+                    logger.info(f"{len(throughput)} FLUXSTDs are used to calculate")
+                    visit_p_visit.append(v)
+                    throughput_mean_p_visit.append(np.nanmean(throughput))
+                    throughput_median_p_visit.append(np.nanmedian(throughput))
+                    throughput_stddev_p_visit.append(np.nanstd(throughput))
+                    # store info into dataframe
+                    df = pd.DataFrame(
+                        data={'pfs_visit_id': [v for _ in range(len(pfsArmFluxstd))],
+                            'fiber_id': pfsArmFluxstd.fiberId,
+                            'throughput': throughput,
+                            }
+                        )
+                    if self.df_throughput is None:
+                        self.df_throughput = df.copy()
+                    else:
+                        self.df_throughput = pd.concat([self.df_throughput, df], ignore_index=True)
+                else:
+                    logger.info(f'visit={v} skipped...')
 
         # populate database (throughput table)
         df = pd.DataFrame(

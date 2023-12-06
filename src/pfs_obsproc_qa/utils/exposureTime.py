@@ -13,6 +13,7 @@ TEXP_NOMINAL = 900.0         # sec.
 SEEING_NOMINAL = 0.80        # arcsec
 TRANSPARENCY_NOMINAL = 0.90  # 
 NOISE_LEVEL_NOMINAL = 10.0   # ADU?
+THROUGHPUT_NOMINAL = 0.15    #
 
 __all__ = ["ExposureTime"]
 
@@ -68,6 +69,7 @@ class ExposureTime(object):
         self.SEEING_NOMINAL = SEEING_NOMINAL
         self.TRANSPARENCY_NOMINAL = TRANSPARENCY_NOMINAL
         self.NOISE_LEVEL_NOMINAL = NOISE_LEVEL_NOMINAL
+        self.THROUGHPUT_NOMINAL = THROUGHPUT_NOMINAL
         self.object_faintness = object_faintness
         self.df_fae = self.getFiberApertureEffectModel()
 
@@ -130,13 +132,14 @@ class ExposureTime(object):
         fae = np.interp(seeing, self.df_fae['fwhm'], self.df_fae['ap_eff_moffat'])
         return fae
     
-    def calcEffectiveExposureTime(self, visit, seeing, transparency, noise_level):
+    def calcEffectiveExposureTime(self, visit, seeing, transparency, throughput, noise_level, mode='FLUXSTD'):
         """        
         Parameters
         ----------
             visit : `int` pfs_visit_id
             seeing : `float` seeing FWHM in arcsec.
             transparency : `float` transparency
+            throughput : `float` throughput
             noise_level : `float` sky-background noise_level
 
         Returns
@@ -148,8 +151,12 @@ class ExposureTime(object):
 
         """
         # calculate the relative change of the observing conditions
-        xi = self.calcFiberApertureEffect(seeing) / self.calcFiberApertureEffect(self.SEEING_NOMINAL)
-        eta = transparency / self.TRANSPARENCY_NOMINAL
+        if mode == 'FLUXSTD':
+            xi = 1.0
+            eta = throughput / self.THROUGHPUT_NOMINAL
+        else:
+            xi = self.calcFiberApertureEffect(seeing) / self.calcFiberApertureEffect(self.SEEING_NOMINAL)
+            eta = transparency / self.TRANSPARENCY_NOMINAL
         noise = noise_level / self.NOISE_LEVEL_NOMINAL
         
         # calculate the effective exposure time
