@@ -16,6 +16,11 @@ from logzero import logger
 
 __all__ = ["Condition"]
 
+TEXP_NOMINAL = 900.0         # sec.
+SEEING_NOMINAL = 0.80        # arcsec
+TRANSPARENCY_NOMINAL = 0.90  # 
+NOISE_LEVEL_NOMINAL = 10.0   # ADU?
+THROUGHPUT_NOMINAL = 0.15    #
 
 class Condition(object):
     """Observing condition
@@ -221,9 +226,11 @@ class Condition(object):
         fwhm_median_p_visit = []  # calculate median per visit
         fwhm_stddev_p_visit = []  # calculate sigma per visit
         visit_p_visit.append(visit)
-        fwhm_mean_p_visit.append(fwhm[pfs_visit_id == visit].mean(skipna=True))
-        fwhm_median_p_visit.append(fwhm[pfs_visit_id == visit].median(skipna=True))
-        fwhm_stddev_p_visit.append(fwhm[pfs_visit_id == visit].std(skipna=True))
+        dat = fwhm[pfs_visit_id == visit]
+        dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+        fwhm_mean_p_visit.append(dat_clip.mean(skipna=True))
+        fwhm_median_p_visit.append(dat_clip.median(skipna=True))
+        fwhm_stddev_p_visit.append(dat_clip.std(skipna=True))
 
         # insert into qaDB
         df = pd.DataFrame(
@@ -332,9 +339,11 @@ class Condition(object):
             visit_p_visit.append(int(v))
             data = transp[pfs_visit_id == v]
             if len(data[data.notna()]) > 0:
-                transp_mean_p_visit.append(data.mean(skipna=True))
-                transp_median_p_visit.append(data.median(skipna=True))
-                transp_stddev_p_visit.append(data.std(skipna=True))
+                dat = data[pfs_visit_id == visit]
+                dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+                transp_mean_p_visit.append(dat_clip.mean(skipna=True))
+                transp_median_p_visit.append(dat_clip.median(skipna=True))
+                transp_stddev_p_visit.append(dat_clip.std(skipna=True))
             else:
                 transp_mean_p_visit.append(np.nan)
                 transp_median_p_visit.append(np.nan)
@@ -435,9 +444,11 @@ class Condition(object):
             visit_p_visit.append(int(v))
             data = ag_background[pfs_visit_id == v]
             if len(data[data.notna()]) > 0:
-                ag_background_mean_p_visit.append(data.mean(skipna=True))
-                ag_background_median_p_visit.append(data.median(skipna=True))
-                ag_background_stddev_p_visit.append(data.std(skipna=True))
+                dat = data[pfs_visit_id == visit]
+                dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+                ag_background_mean_p_visit.append(dat_clip.mean(skipna=True))
+                ag_background_median_p_visit.append(dat_clip.median(skipna=True))
+                ag_background_stddev_p_visit.append(dat_clip.std(skipna=True))
             else:
                 ag_background_mean_p_visit.append(np.nan)
                 ag_background_median_p_visit.append(np.nan)
@@ -580,15 +591,19 @@ class Condition(object):
                     self.df_sky_noise = df2.copy()
                 else:
                     self.df_sky_noise = pd.concat([self.df_sky_noise, df2.copy()], ignore_index=True)
-                sky = df1['background_level']
-                noise = df2['noise_level']
                 visit_p_visit.append(v)
-                sky_mean_p_visit.append(sky.mean(skipna=True))
-                sky_median_p_visit.append(sky.median(skipna=True))
-                sky_stddev_p_visit.append(sky.std(skipna=True))
-                noise_mean_p_visit.append(noise.mean(skipna=True))
-                noise_median_p_visit.append(noise.median(skipna=True))
-                noise_stddev_p_visit.append(noise.std(skipna=True))
+                #sky = df1['background_level']
+                dat = df1.query(f'pfs_visit_id=={visit}').background_level
+                dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+                sky_mean_p_visit.append(dat_clip.mean(skipna=True))
+                sky_median_p_visit.append(dat_clip.median(skipna=True))
+                sky_stddev_p_visit.append(dat_clip.std(skipna=True))
+                #noise = df2['noise_level']
+                dat = df2.query(f'pfs_visit_id=={visit}').noise_level
+                dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+                noise_mean_p_visit.append(dat_clip.mean(skipna=True))
+                noise_median_p_visit.append(dat_clip.median(skipna=True))
+                noise_stddev_p_visit.append(dat_clip.std(skipna=True))
             else:
                 logger.info(f'visit={v} skipped...')
 
