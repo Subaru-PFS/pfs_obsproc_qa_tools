@@ -8,10 +8,7 @@ from logzero import logger
 import warnings
 warnings.filterwarnings('ignore')
 
-
-def get_url(conf):
-    url = f'{conf["dialect"]}://{conf["user"]}@{conf["host"]}:{conf["port"]}/{conf["dbname"]}'
-    return url 
+from .utils import get_url
 
 
 class QaDB(object):

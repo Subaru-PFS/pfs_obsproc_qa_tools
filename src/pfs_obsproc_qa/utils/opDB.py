@@ -4,10 +4,7 @@ from sqlalchemy import create_engine
 import pandas as pd
 from logzero import logger
 
-
-def get_url(conf):
-    url = f'{conf["dialect"]}://{conf["user"]}@{conf["host"]}:{conf["port"]}/{conf["dbname"]}'
-    return url 
+from .utils import get_url
 
 
 class OpDB(object):

@@ -22,3 +22,7 @@ def read_conf(conf):
     """
     config = toml.load(conf)
     return config
+
+def get_url(conf):
+    url = f'{conf["dialect"]}://{conf["user"]}@{conf["host"]}:{conf["port"]}/{conf["dbname"]}'
+    return url 
