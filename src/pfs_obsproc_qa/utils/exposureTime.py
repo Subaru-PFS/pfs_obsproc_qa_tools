@@ -22,7 +22,9 @@ class ExposureTime(object):
 
     The exposure time required to achieve a given S/N (SNR) is defined as follows
 
-            t = SNR^2 x (N_obj x \\xi + N_sky) / (N_obj^2 x \\xi^2 x \\eta)
+            t = SNR^2 x (N_obj x \\xi + N_sky) / (N_obj^2 x \\xi^2 x \\eta),
+
+            where N_obj is the count rate of object and N_sky is the count rate of sky within the fiber aperture. \\xi is the flux ratio degraded by the fiber aperture and \\eta is the throughput including instrument and atmosphere. Note that \\xi depends on seeing and \\eta depends on the atmospheric transparency.
 
         (1) bright objects compared to sky background
 
@@ -38,12 +40,18 @@ class ExposureTime(object):
 
             t_eff = t_nominal x (\\xi_obs/\\xi_nom) x (\\eta_obs/\\eta_nom)
 
+            (if \\xi is included in the throughput term)
+            t_eff = t_nominal x (\\eta_obs/\\eta_nom)
+
         (2) faint objects compared to sky background
 
             t_eff = t_nominal x (N_sky,nom/N_sky,obs) x (\\xi_obs/\\xi_nom)^2 x (\\eta_obs/\\eta_nom)^2
                 or
             t_eff = t_nominal x (sigma_sky,nom/sigma_sky,obs)^2 x (\\xi_obs/\\xi_nom)^2 x (\\eta_obs/\\eta_nom)^2
 
+            (if \\xi is included in the throughput term)
+            t_eff = t_nominal x (sigma_sky,nom/sigma_sky,obs)^2 x (\\eta_obs/\\eta_nom)^2
+            
     """
     def __init__(self, conf='config.toml', object_faintness=1):
         """        

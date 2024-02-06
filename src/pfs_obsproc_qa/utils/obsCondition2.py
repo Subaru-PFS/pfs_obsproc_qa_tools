@@ -58,6 +58,8 @@ class Condition(object):
         self.df_sky_background = None
         self.df_sky_background_stats_pv = None
         self.df_sky_noise = None
+        self.df_flxstd_noise = None
+        self.df_science_noise = None
         self.df_sky_noise_stats_pv = None
         self.df_seeing_stats = None
         self.df_transparency_stats = None
@@ -550,25 +552,45 @@ class Condition(object):
                 logger.info(f"pfsMerged is used")
                 if pfsMerged is not None:
                     spectraSky = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.SKY)
+                    spectraFluxstd = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                    spectraScience = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
                 else:
                     spectraSky = None
+                    spectraFluxstd = None
+                    spectraScience = None
             else:
                 logger.info(f"pfsArm is used")
                 if pfsArm is not None:
                     spectraSky = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.SKY)
+                    spectraFluxstd = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                    spectraScience = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
                 else:
                     spectraSky = None
+                    spectraFluxstd = None
+                    spectraScience = None
            
             if spectraSky is not None:
                 data1 = []
                 data2 = []
-                for wav, flx in zip(spectraSky.wavelength, spectraSky.flux):
+                for wav, flx, sky in zip(spectraSky.wavelength, spectraSky.flux, spectraSky.sky):
                     wc = self.skyQaConf["ref_wav_sky"]
                     dw = self.skyQaConf["ref_dwav_sky"]
                     msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
-                    data1.append(np.nanmedian(flx[msk]))
+                    data1.append(np.nanmedian(sky[msk]))
                     data2.append(np.nanstd(flx[msk]))
                 logger.info(f"{len(data1)} SKYs are used to calculate")
+                data2f = []
+                for wav, flx in zip(spectraFluxstd.wavelength, spectraFluxstd.flux):
+                    wc = self.skyQaConf["ref_wav_sky"]
+                    dw = self.skyQaConf["ref_dwav_sky"]
+                    msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
+                    data2f.append(np.nanstd(flx[msk]))
+                data2s = []
+                for wav, flx in zip(spectraScience.wavelength, spectraScience.flux):
+                    wc = self.skyQaConf["ref_wav_sky"]
+                    dw = self.skyQaConf["ref_dwav_sky"]
+                    msk = (wav > wc-dw) * (wav < wc+dw) # FIXME (SKYLINE should be masked)
+                    data2s.append(np.nanstd(flx[msk]))
                 # store info into dataframe
                 df1 = pd.DataFrame(
                     data={'pfs_visit_id': [v for _ in range(len(spectraSky))],
@@ -587,11 +609,31 @@ class Condition(object):
                         'noise_level': data2,
                         }
                     )
+                df2f = pd.DataFrame(
+                    data={'pfs_visit_id': [v for _ in range(len(spectraFluxstd))],
+                        'fiber_id': spectraFluxstd.fiberId,
+                        'noise_level': data2f,
+                        }
+                    )
+                df2s = pd.DataFrame(
+                    data={'pfs_visit_id': [v for _ in range(len(spectraScience))],
+                        'fiber_id': spectraScience.fiberId,
+                        'noise_level': data2s,
+                        }
+                    )
                 if self.df_sky_noise is None:
                     self.df_sky_noise = df2.copy()
                 else:
                     self.df_sky_noise = pd.concat([self.df_sky_noise, df2.copy()], ignore_index=True)
                 visit_p_visit.append(v)
+                if self.df_flxstd_noise is None:
+                    self.df_flxstd_noise = df2f.copy()
+                else:
+                    self.df_flxstd_noise = pd.concat([self.df_flxstd_noise, df2f.copy()], ignore_index=True)
+                if self.df_science_noise is None:
+                    self.df_science_noise = df2s.copy()
+                else:
+                    self.df_science_noise = pd.concat([self.df_science_noise, df2s.copy()], ignore_index=True)
                 #sky = df1['background_level']
                 dat = df1.query(f'pfs_visit_id=={visit}').background_level
                 dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
