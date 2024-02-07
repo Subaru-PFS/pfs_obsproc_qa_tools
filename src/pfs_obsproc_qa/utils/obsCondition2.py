@@ -114,6 +114,25 @@ class Condition(object):
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
         return df
 
+    def getPfsVisit(self, visit):
+        """ Get SpS exposure information
+
+        Parameters
+        ----------
+            visit : pfs_visit_id
+        
+        Returns
+        ----------
+            
+        Examples
+        ----------
+
+        """
+        sqlWhere = f'pfs_visit.pfs_visit_id={visit}'
+        sqlCmd = f'SELECT * FROM pfs_visit WHERE {sqlWhere};'
+        df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
+        return df
+
     def getGuideError(self, visit):
         """ Get GuideError information
 
@@ -157,7 +176,7 @@ class Condition(object):
 
         # get information from agc_data table
         df = self.getAgcData(visit)
-
+        
         agc_exposure_id = df['agc_exposure_id']
         seq = np.unique(agc_exposure_id)
         taken_at = df['taken_at']
@@ -285,6 +304,7 @@ class Condition(object):
         mag2 = df['estimated_magnitude']
         dmag = mag2 - mag1
         transp = 10**(-0.4*dmag) / self.conf['agc']['transparency_correction']
+        transp[transp>2.0] = 2.0
 
         df = pd.DataFrame(
             data={'pfs_visit_id': pfs_visit_id,
@@ -506,6 +526,11 @@ class Condition(object):
         obstime = obstime.tz_localize('US/Hawaii')
         obstime = obstime.tz_convert('UTC')
         obsdate = obstime.date().strftime('%Y-%m-%d')
+        _df = self.getPfsVisit(visit=visit)
+        if len(_df) > 0:
+            pfs_design_id = _df.pfs_design_id[0]
+        else:
+            pfs_design_id = None
 
         visit_p_visit = []
         sky_mean_p_visit = []    # calculate background level (mean over fibers) per visit
@@ -528,16 +553,23 @@ class Condition(object):
             else:
                 _pfsArmDataDir = os.path.join(rerun, 'pfsArm', obsdate, 'v%06d' % (v))
                 _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged', obsdate, 'v%06d' % (v))
+                _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
+                if os.path.isdir(_pfsArmDataDir) is False:
+                    _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
+                if os.path.isdir(_pfsMergedDataDir) is False:
+                    _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
+                if os.path.isdir(_pfsConfigDataDir) is False:
+                    _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
                 _identity = Identity(visit=v, 
                                      arm=self.skyQaConf["ref_arm_sky"],
                                      spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
                     pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
-                    _pfsDesignId = pfsArm.identity._pfsDesignId
+                    _pfsDesignId = pfs_design_id
                     pfsMerged = PfsMerged.read(_identity, dirName=_pfsMergedDataDir)
                     pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v, 
-                                            dirName=os.path.join(pfsConfigDir, obsdate))
+                                            dirName=_pfsConfigDataDir)
                 except:
                     pfsArm = None
                     pfsMerged = None
@@ -717,6 +749,11 @@ class Condition(object):
         obstime = obstime.tz_localize('US/Hawaii')
         obstime = obstime.tz_convert('UTC')
         obsdate = obstime.date().strftime('%Y-%m-%d')
+        _df = self.getPfsVisit(visit=visit)
+        if len(_df) > 0:
+            pfs_design_id = _df.pfs_design_id[0]
+        else:
+            pfs_design_id = None
 
         visit_p_visit = []
         throughput_mean_p_visit = []    # calculate throughput (mean over fibers) per visit
@@ -737,17 +774,25 @@ class Condition(object):
                 _pfsArmDataDir = os.path.join(rerun, 'pfsArm', obsdate, 'v%06d' % (v))
                 _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged', obsdate, 'v%06d' % (v))
                 _pfsFluxReferenceDataDir = os.path.join(rerun, 'pfsFluxReference', obsdate, 'v%06d' % (v))
-
+                _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
+                if os.path.isdir(_pfsArmDataDir) is False:
+                    _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
+                if os.path.isdir(_pfsMergedDataDir) is False:
+                    _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
+                if os.path.isdir(_pfsFluxReferenceDataDir) is False:
+                    _pfsFluxReferenceDataDir = os.path.join(rerun, 'pfsFluxReference')
+                if os.path.isdir(_pfsConfigDataDir) is False:
+                    _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
                 _identity = Identity(visit=v, 
                                      arm=self.skyQaConf["ref_arm_sky"],
                                      spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
                     pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
-                    _pfsDesignId = pfsArm.identity._pfsDesignId
+                    _pfsDesignId = pfs_design_id
                     pfsMerged = PfsMerged.read(_identity, dirName=_pfsMergedDataDir)
                     pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v, 
-                                            dirName=os.path.join(pfsConfigDir, obsdate))
+                                            dirName=_pfsConfigDataDir)
                     if usePfsFluxReference is True:
                         pfsFluxReference = PfsFluxReference.read(_identity, dirName=_pfsFluxReferenceDataDir)
                     else:
@@ -758,7 +803,6 @@ class Condition(object):
                     _pfsDesignId = None
                     pfsConfig = None
                     pfsFluxReference = None
-
             # calculate the throughput from FLUXSTD spectra
             logger.info(f"calculating throughput for visit={v}...")
 
@@ -804,9 +848,14 @@ class Condition(object):
                     throughput.append(np.nanmedian(flx[msk]) / refFlux * 5)
                 logger.info(f"{len(throughput)} FLUXSTDs are used to calculate")
                 visit_p_visit.append(v)
-                throughput_mean_p_visit.append(np.nanmean(throughput))
-                throughput_median_p_visit.append(np.nanmedian(throughput))
-                throughput_stddev_p_visit.append(np.nanstd(throughput))
+                if len(throughput) > 0:
+                    throughput_mean_p_visit.append(np.nanmean(throughput))
+                    throughput_median_p_visit.append(np.nanmedian(throughput))
+                    throughput_stddev_p_visit.append(np.nanstd(throughput))
+                else:
+                    throughput_mean_p_visit.append(-1)
+                    throughput_median_p_visit.append(-1)
+                    throughput_stddev_p_visit.append(-1)
                 # store info into dataframe
                 df = pd.DataFrame(
                     data={'pfs_visit_id': [v for _ in range(len(SpectraFluxstd))],
