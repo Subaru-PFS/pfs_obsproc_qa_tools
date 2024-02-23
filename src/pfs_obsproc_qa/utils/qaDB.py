@@ -38,7 +38,10 @@ class QaDB(object):
             df_new = pd.DataFrame(
                 data={k: [v] for k, v in data.items()}
                 )
-            df_new = df_new.fillna(-1).astype(float)
+            try:
+                df_new = df_new.fillna(-1).astype(float)
+            except:
+                df_new = df_new
             try:
                 df_new.to_sql(tableName, self._engine, if_exists='append', index=False)
             except exc.IntegrityError:

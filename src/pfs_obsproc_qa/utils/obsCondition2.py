@@ -75,7 +75,7 @@ class Condition(object):
         self.skyQaConf = self.conf["qa"]["sky"]["config"]
 
         logzero.logfile(self.conf['logger']['logfile'], disableStderrLogger=True)
-       
+
     def getAgcData(self, visit):
         """ Get AGC data information
 
@@ -176,11 +176,14 @@ class Condition(object):
 
         # get information from agc_data table
         df = self.getAgcData(visit)
-        
         agc_exposure_id = df['agc_exposure_id']
         seq = np.unique(agc_exposure_id)
         taken_at = df['taken_at']
         pfs_visit_id = df['pfs_visit_id'].astype(int)
+        _df = self.getPfsVisit(visit)
+        pfs_visit_description = _df['pfs_visit_description'][0]
+        pfs_design_id = _df['pfs_design_id'][0]
+        issued_at = _df['issued_at'][0]
         agc_camera_id = df['agc_camera_id']
         flags = df['flags']
 
@@ -191,7 +194,7 @@ class Condition(object):
         sigma_a = self.conf['agc']['ag_pix_scale'] * np.sqrt((g1+g3)/2)
         sigma_b = self.conf['agc']['ag_pix_scale'] * np.sqrt((g1-g3)/2)
         sigma = np.sqrt(sigma_a*sigma_b)
-        
+
         # simple calculation 
         #varia = df['central_image_moment_20_pix'] * df['central_image_moment_02_pix'] - df['central_image_moment_11_pix']**2
         #sigma = self.conf['agc']['ag_pix_scale'] * varia**0.25
@@ -255,7 +258,11 @@ class Condition(object):
 
         # insert into qaDB
         df = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit}
+            data={'pfs_visit_id': visit_p_visit,
+                  # 'pfs_visit_description': [pfs_visit_description],
+                  'pfs_design_id': [pfs_design_id],
+                  # 'issued_at': [issued_at],
+                  }
             )
         self.qadb.populateQATable('pfs_visit', df)
 
@@ -265,9 +272,8 @@ class Condition(object):
                   'seeing_median': fwhm_median_p_visit,
                   'seeing_sigma': fwhm_stddev_p_visit,
                   'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                  },
-            
-                  )
+                  }
+            )
         df = df.fillna(-1).astype(float)
         self.qadb.populateQATable('seeing', df)
         if self.df_seeing_stats_pv is None:
@@ -1138,7 +1144,10 @@ class Condition(object):
                 if saveFig == True:
                     plt.savefig(os.path.join(dirName, f'{figName}_guide_error.pdf'), bbox_inches='tight')
 
-    def getCondition(self, visits, showPlot=True, xaxis='taken_at', cc='cameraId', saveFig=False, figName='', dirName='.'):
+    def getCondition(self, visits, showPlot=True, 
+                     xaxis='taken_at', cc='cameraId', 
+                     skipCalcSkyBackground=False, skipCalcThroughput=False,
+                     saveFig=False, figName='', dirName='.'):
         """Calculate various observing condition such as seeing, transparency, etc. 
 
         Parameters
@@ -1164,9 +1173,11 @@ class Condition(object):
                 # getGuideOffset
                 self.getGuideError(visit=visit)
                 # get background level
-                self.calcSkyBackground(visit=visit)
+                if skipCalcSkyBackground==False:
+                    self.calcSkyBackground(visit=visit)
                 # get throughput
-                self.calcThroughput(visit=visit)
+                if skipCalcThroughput==False:
+                    self.calcThroughput(visit=visit)
                 # append visit
                 self.visitList.append(visit)
             else:
