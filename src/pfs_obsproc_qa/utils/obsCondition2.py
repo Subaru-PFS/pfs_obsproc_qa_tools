@@ -22,6 +22,9 @@ TRANSPARENCY_NOMINAL = 0.90  #
 NOISE_LEVEL_NOMINAL = 10.0   # ADU?
 THROUGHPUT_NOMINAL = 0.15    #
 
+MAG_THRESH1 = 14.0
+MAG_THRESH2 = 20.0
+
 class Condition(object):
     """Observing condition
     """
@@ -91,7 +94,7 @@ class Condition(object):
 
         """
         sqlWhere = f'agc_exposure.pfs_visit_id={visit}'
-        sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.taken_at,agc_data.agc_camera_id,central_image_moment_11_pix,central_image_moment_20_pix,central_image_moment_02_pix,background,estimated_magnitude,agc_data.flags,agc_match.guide_star_id,pfs_design_agc.guide_star_magnitude FROM agc_exposure JOIN agc_data ON agc_exposure.agc_exposure_id=agc_data.agc_exposure_id JOIN agc_match ON agc_data.agc_exposure_id=agc_match.agc_exposure_id AND agc_data.agc_camera_id=agc_match.agc_camera_id AND agc_data.spot_id=agc_match.spot_id JOIN pfs_design_agc ON agc_match.pfs_design_id=pfs_design_agc.pfs_design_id AND agc_match.guide_star_id=pfs_design_agc.guide_star_id WHERE {sqlWhere} AND agc_data.flags<=1 ORDER BY agc_exposure.agc_exposure_id;'
+        sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.agc_exptime,agc_exposure.taken_at,agc_data.agc_camera_id,image_moment_00_pix,central_image_moment_11_pix,central_image_moment_20_pix,central_image_moment_02_pix,peak_intensity,background,estimated_magnitude,agc_data.flags,agc_match.guide_star_id,pfs_design_agc.guide_star_magnitude FROM agc_exposure JOIN agc_data ON agc_exposure.agc_exposure_id=agc_data.agc_exposure_id JOIN agc_match ON agc_data.agc_exposure_id=agc_match.agc_exposure_id AND agc_data.agc_camera_id=agc_match.agc_camera_id AND agc_data.spot_id=agc_match.spot_id JOIN pfs_design_agc ON agc_match.pfs_design_id=pfs_design_agc.pfs_design_id AND agc_match.guide_star_id=pfs_design_agc.guide_star_id WHERE {sqlWhere} AND agc_data.flags<=1 ORDER BY agc_exposure.agc_exposure_id;'
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
         return df
     
@@ -186,7 +189,8 @@ class Condition(object):
         issued_at = _df['issued_at'][0]
         agc_camera_id = df['agc_camera_id']
         flags = df['flags']
-
+        magnitude = df['guide_star_magnitude']
+        
         # calculate FWHM (reference: Magnier et al. 2020, ApJS, 251, 5)
         g1 = df['central_image_moment_20_pix'] + df['central_image_moment_02_pix']
         g2 = df['central_image_moment_20_pix'] - df['central_image_moment_02_pix']
@@ -194,23 +198,25 @@ class Condition(object):
         sigma_a = self.conf['agc']['ag_pix_scale'] * np.sqrt((g1+g3)/2)
         sigma_b = self.conf['agc']['ag_pix_scale'] * np.sqrt((g1-g3)/2)
         sigma = np.sqrt(sigma_a*sigma_b)
-
+        
         # simple calculation 
         #varia = df['central_image_moment_20_pix'] * df['central_image_moment_02_pix'] - df['central_image_moment_11_pix']**2
         #sigma = self.conf['agc']['ag_pix_scale'] * varia**0.25
 
         fwhm = sigma * 2.355
 
+        msk = (magnitude>MAG_THRESH1) * (magnitude<MAG_THRESH2)
+
         df = pd.DataFrame(
-            data={'pfs_visit_id': pfs_visit_id,
-                  'agc_exposure_id': agc_exposure_id,
-                  'agc_camera_id': agc_camera_id,
-                  'taken_at': taken_at,
-                  'sigma_a': sigma_a,
-                  'sigma_b': sigma_b,
-                  'sigma': sigma,
-                  'fwhm': fwhm,
-                  'flags': flags,
+            data={'pfs_visit_id': pfs_visit_id[msk],
+                  'agc_exposure_id': agc_exposure_id[msk],
+                  'agc_camera_id': agc_camera_id[msk],
+                  'taken_at': taken_at[msk],
+                  'sigma_a': sigma_a[msk],
+                  'sigma_b': sigma_b[msk],
+                  'sigma': sigma[msk],
+                  'fwhm': fwhm[msk],
+                  'flags': flags[msk],
                   })
         if self.df_seeing is None:
             self.df_seeing = df.copy()
@@ -249,9 +255,9 @@ class Condition(object):
         fwhm_mean_p_visit = []    # calculate mean per visit
         fwhm_median_p_visit = []  # calculate median per visit
         fwhm_stddev_p_visit = []  # calculate sigma per visit
-        visit_p_visit.append(visit)
         dat = fwhm[pfs_visit_id == visit]
         dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+        visit_p_visit.append(visit)
         fwhm_mean_p_visit.append(dat_clip.mean(skipna=True))
         fwhm_median_p_visit.append(dat_clip.median(skipna=True))
         fwhm_stddev_p_visit.append(dat_clip.std(skipna=True))
@@ -259,23 +265,24 @@ class Condition(object):
         # insert into qaDB
         df = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
-                  # 'pfs_visit_description': [pfs_visit_description],
-                  'pfs_design_id': [pfs_design_id],
-                  # 'issued_at': [issued_at],
-                  }
+                # 'pfs_visit_description': [pfs_visit_description],
+                'pfs_design_id': [pfs_design_id],
+                # 'issued_at': [issued_at],
+                }
             )
         self.qadb.populateQATable('pfs_visit', df)
 
         df = pd.DataFrame(
             data={'pfs_visit_id': visit_p_visit,
-                  'seeing_mean': fwhm_mean_p_visit,
-                  'seeing_median': fwhm_median_p_visit,
-                  'seeing_sigma': fwhm_stddev_p_visit,
-                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                  }
+                'seeing_mean': fwhm_mean_p_visit,
+                'seeing_median': fwhm_median_p_visit,
+                'seeing_sigma': fwhm_stddev_p_visit,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                }
             )
         df = df.fillna(-1).astype(float)
         self.qadb.populateQATable('seeing', df)
+
         if self.df_seeing_stats_pv is None:
             self.df_seeing_stats_pv = df.copy()
         else:
@@ -307,20 +314,24 @@ class Condition(object):
         flags = df['flags']
 
         mag1 = df['guide_star_magnitude']
-        mag2 = df['estimated_magnitude']
+        #mag2 = df['estimated_magnitude'] - 2.5*np.log10(1e+06/df['agc_exptime'])
+        mag2 = -2.5*np.log10(df['image_moment_00_pix'] / df['agc_exptime']) * 0.928 + 27.389
         dmag = mag2 - mag1
+
         transp = 10**(-0.4*dmag) / self.conf['agc']['transparency_correction']
         transp[transp>2.0] = 2.0
 
+        msk = (mag1>MAG_THRESH1) * (mag1<MAG_THRESH2)
+
         df = pd.DataFrame(
-            data={'pfs_visit_id': pfs_visit_id,
-                  'agc_exposure_id': agc_exposure_id,
-                  'agc_camera_id': agc_camera_id,
-                  'taken_at': taken_at,
-                  'guide_star_magnitude': mag1,
-                  'estimated_magnitude': mag2,
-                  'transp': transp,
-                  'flags': flags,
+            data={'pfs_visit_id': pfs_visit_id[msk],
+                  'agc_exposure_id': agc_exposure_id[msk],
+                  'agc_camera_id': agc_camera_id[msk],
+                  'taken_at': taken_at[msk],
+                  'guide_star_magnitude': mag1[msk],
+                  'estimated_magnitude': mag2[msk],
+                  'transp': transp[msk],
+                  'flags': flags[msk],
                   })
         if self.df_transparency is None:
             self.df_transparency = df.copy()
@@ -571,7 +582,14 @@ class Condition(object):
                                      spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
-                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    try:
+                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    except:
+                        _identity = Identity(visit=v, 
+                                            arm="m",
+                                            spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                            )
+                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
                     _pfsDesignId = pfs_design_id
                     pfsMerged = PfsMerged.read(_identity, dirName=_pfsMergedDataDir)
                     pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v, 
@@ -606,7 +624,6 @@ class Condition(object):
                     spectraSky = None
                     spectraFluxstd = None
                     spectraScience = None
-           
             if spectraSky is not None:
                 data1 = []
                 data2 = []
@@ -794,7 +811,14 @@ class Condition(object):
                                      spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
-                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    try:
+                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    except:
+                        _identity = Identity(visit=v, 
+                                            arm="m",
+                                            spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                            )
+                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
                     _pfsDesignId = pfs_design_id
                     pfsMerged = PfsMerged.read(_identity, dirName=_pfsMergedDataDir)
                     pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v, 
@@ -854,6 +878,7 @@ class Condition(object):
                     throughput.append(np.nanmedian(flx[msk]) / refFlux * 5)
                 logger.info(f"{len(throughput)} FLUXSTDs are used to calculate")
                 visit_p_visit.append(v)
+
                 if len(throughput) > 0:
                     throughput_mean_p_visit.append(np.nanmean(throughput))
                     throughput_median_p_visit.append(np.nanmedian(throughput))
@@ -1190,6 +1215,9 @@ class Condition(object):
             self.plotSkyBackground(saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotThroughput(saveFig=saveFig, figName=figName, dirName=dirName)
             self.plotGuideError(cc=cc, xaxis=xaxis, saveFig=saveFig, figName=figName, dirName=dirName)
+
+        self.qadb.close()
+        self.opdb.close()
 
     def fetch_visit(self, visitStart, visitEnd=None):
         if visitEnd is None:

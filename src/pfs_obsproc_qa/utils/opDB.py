@@ -27,3 +27,7 @@ class OpDB(object):
     def query(self, sqlCmd):
         df = pd.read_sql(sql=sqlCmd, con=self._conn)
         return df
+
+    def close(self):
+        self._conn.close()
+        

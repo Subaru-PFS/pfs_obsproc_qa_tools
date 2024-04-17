@@ -63,3 +63,7 @@ class QaDB(object):
                 else:
                     logger.info('No update...')
                     pass
+
+    def close(self):
+        self._conn.close()
+        
