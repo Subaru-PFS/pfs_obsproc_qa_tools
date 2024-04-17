@@ -53,12 +53,12 @@ class ExposureTime(object):
             t_eff = t_nominal x (sigma_sky,nom/sigma_sky,obs)^2 x (\\eta_obs/\\eta_nom)^2
             
     """
-    def __init__(self, conf='config.toml', object_faintness=1):
+    def __init__(self, conf='config.toml', isFaint=True):
         """        
         Parameters
         ----------
             conf: `str` config toml filepath (default: config.toml)
-            object_faintness : `int` (0=bright, 1=faint, default=1)
+            isFaint : `bool` (default: True)
         
         Returns
         ----------
@@ -78,7 +78,7 @@ class ExposureTime(object):
         self.TRANSPARENCY_NOMINAL = TRANSPARENCY_NOMINAL
         self.NOISE_LEVEL_NOMINAL = NOISE_LEVEL_NOMINAL
         self.THROUGHPUT_NOMINAL = THROUGHPUT_NOMINAL
-        self.object_faintness = object_faintness
+        self.isFaint = isFaint
         self.df_fae = self.getFiberApertureEffectModel()
 
         # database config
@@ -168,7 +168,7 @@ class ExposureTime(object):
         noise = noise_level / self.NOISE_LEVEL_NOMINAL
         
         # calculate the effective exposure time
-        if self.object_faintness == 0:
+        if self.isFaint is False:
             # object is bright (so object limited)
             self.t_effective = self.TEXP_NOMINAL * xi * eta
         else:
