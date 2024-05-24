@@ -165,17 +165,19 @@ class Condition(object):
             self.df_guide_error = pd.concat(
                 [self.df_guide_error, df], ignore_index=True)
 
-    def calcSeeing(self, visit, corrColor=True, updateDB=True):
+    def calcSeeing(self, visit, correct=True, corrColor=True, updateDB=True):
         """Calculate Seeing size based on AGC measurements
 
         Parameters
         ----------
         visit : int
             pfs_visit_id
+        correct : bool, optional
+            Apply correction for the measurement? (default: True)
         corrColor : bool, optional
             Apply color correction? (default: True)
         updateDB : bool, optional
-            Whether to skip updating the seeing data (default: True).
+            Whether to update the seeing data in the database (default: True).
 
         Returns
         ----------
@@ -224,6 +226,9 @@ class Condition(object):
         #varia = df['central_image_moment_20_pix'] * df['central_image_moment_02_pix'] - df['central_image_moment_11_pix']**2
         #sigma = self.conf['agc']['ag_pix_scale'] * varia**0.25
        
+        # correction so that the seeing is measured at cobra focal plane and as a Moffat profile
+        sigma = sigma * self.conf['agc']['seeing_correction']
+
         fwhm = sigma * 2.355
 
         msk = (magnitude > MAG_THRESH1) * (magnitude < MAG_THRESH2)
