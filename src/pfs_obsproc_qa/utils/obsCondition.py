@@ -759,28 +759,28 @@ class Condition(object):
             if spectraSky is not None:
                 data1 = []
                 data2 = []
-                for wav, flx, sky in zip(spectraSky.wavelength, spectraSky.flux, spectraSky.sky):
+                for wav, flx, sky, msk in zip(spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
                     wc = self.skyQaConf["ref_wav_sky"]
                     dw = self.skyQaConf["ref_dwav_sky"]
                     # FIXME (SKYLINE should be masked)
-                    msk = (wav > wc-dw) * (wav < wc+dw)
-                    data1.append(np.nanmedian(sky[msk]))
-                    data2.append(np.nanstd(flx[msk]))
+                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
+                    data1.append(np.nanmedian(sky[flg]))
+                    data2.append(np.nanstd(flx[flg]))
                 logger.info(f"{len(data1)} SKYs are used to calculate")
                 data2f = []
-                for wav, flx in zip(spectraFluxstd.wavelength, spectraFluxstd.flux):
+                for wav, flx, msk in zip(spectraFluxstd.wavelength, spectraFluxstd.flux, spectraFluxstd.mask):
                     wc = self.skyQaConf["ref_wav_sky"]
                     dw = self.skyQaConf["ref_dwav_sky"]
                     # FIXME (SKYLINE should be masked)
-                    msk = (wav > wc-dw) * (wav < wc+dw)
-                    data2f.append(np.nanstd(flx[msk]))
+                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
+                    data2f.append(np.nanstd(flx[flg]))
                 data2s = []
-                for wav, flx in zip(spectraScience.wavelength, spectraScience.flux):
+                for wav, flx, msk in zip(spectraScience.wavelength, spectraScience.flux, spectraScience.mask):
                     wc = self.skyQaConf["ref_wav_sky"]
                     dw = self.skyQaConf["ref_dwav_sky"]
                     # FIXME (SKYLINE should be masked)
-                    msk = (wav > wc-dw) * (wav < wc+dw)
-                    data2s.append(np.nanstd(flx[msk]))
+                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
+                    data2s.append(np.nanstd(flx[flg]))
                 # store info into dataframe
                 df1 = pd.DataFrame(
                     data={'pfs_visit_id': [v for _ in range(len(spectraSky))],
@@ -1026,23 +1026,23 @@ class Condition(object):
 
             if SpectraFluxstd is not None:
                 throughput = []
-                for fid, wav, flx in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux):
+                for fid, wav, flx, msk in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux, SpectraFluxstd.mask):
                     wc = self.skyQaConf["ref_wav_sky"]
                     dw = self.skyQaConf["ref_dwav_sky"]
                     if usePfsFluxReference is True:
                         wav_pfr = np.array(
                             pfsFluxReference.wavelength.tolist())
                         flx_pfr = pfsFluxReference.flux[pfsFluxReference.fiberId == fid][0]
-                        msk = (wav_pfr > wc - dw) * \
-                            (wav_pfr < wc + dw)  # FIXME?
-                        refFlux = np.nanmedian(flx_pfr[msk])
+                        flg = (wav_pfr > wc - dw) * (wav_pfr < wc + dw) # FIXME?
+                        refFlux = np.nanmedian(flx_pfr[flg])
+                        logger.info(f'pfsFluxReference is used...')
                     else:
-                        refFlux = pfsConfig[pfsConfig.fiberId ==
-                                            fid].psfFlux[0][idx_psfFlux]
+                        refFlux = pfsConfig[pfsConfig.fiberId == fid].psfFlux[0][idx_psfFlux]
+                        logger.info(f'psfFlux is used...')
 
                     # FIXME (SKYLINE should be masked)
-                    msk = (wav > wc-dw) * (wav < wc+dw)
-                    throughput.append(np.nanmedian(flx[msk]) / refFlux * 5)
+                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk == 0)
+                    throughput.append(np.nanmedian(flx[flg]) / refFlux)
                 logger.info(
                     f"{len(throughput)} FLUXSTDs are used to calculate")
                 visit_p_visit.append(v)
@@ -1523,7 +1523,7 @@ class Condition(object):
     def getConditionDrp(self, visits, showPlot=True,
                         xaxis='taken_at', cc='cameraId',
                         skipCalcSkyBackground=False, skipCalcThroughput=False,
-                        saveFig=False, figName='', dirName='.',
+                        saveFig=False, figName='', dirName='.', usePfsMerged=True,
                         resetVisitList=True, closeDB=False, updateDB=True):
         """Calculate various observing conditions such as seeing, transparency, etc. 
 
@@ -1571,10 +1571,10 @@ class Condition(object):
             if visit not in self.visitList:
                 # get background level
                 if skipCalcSkyBackground == False:
-                    self.calcSkyBackground(visit=visit, updateDB=updateDB)
+                    self.calcSkyBackground(visit=visit, usePfsMerged=usePfsMerged, updateDB=updateDB)
                 # get throughput
                 if skipCalcThroughput == False:
-                    self.calcThroughput(visit=visit, updateDB=updateDB)
+                    self.calcThroughput(visit=visit, usePfsMerged=usePfsMerged, updateDB=updateDB)
                 # append visit
                 self.visitList.append(visit)
             else:
