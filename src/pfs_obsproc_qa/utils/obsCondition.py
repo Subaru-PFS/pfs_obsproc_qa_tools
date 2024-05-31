@@ -757,8 +757,14 @@ class Condition(object):
                     dw = self.skyQaConf["ref_dwav_sky"]
                     # FIXME (SKYLINE should be masked)
                     flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
-                    data1.append(np.nanmedian(sky[flg]))
-                    data2.append(np.nanstd(flx[flg]))
+                    df = pd.DataFrame({'sky': sky[flg], 'flx': flx[flg]})
+                    # sky background level
+                    dat = df.sky
+                    data1.append(np.nanmedian(dat))
+                    # flux purturbation
+                    dat = df.flx
+                    dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+                    data2.append(dat_clip.std(skipna=True))
                 logger.info(f"{len(data1)} SKYs are used to calculate")
                 data2f = []
                 for wav, flx, msk in zip(spectraFluxstd.wavelength, spectraFluxstd.flux, spectraFluxstd.mask):

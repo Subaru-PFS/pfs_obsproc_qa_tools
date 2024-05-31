@@ -9,12 +9,6 @@ from .opDB import OpDB
 from .qaDB import QaDB
 from .utils import read_conf
 
-TEXP_NOMINAL = 900.0         # sec.
-SEEING_NOMINAL = 0.80        # arcsec
-TRANSPARENCY_NOMINAL = 0.90  # 
-NOISE_LEVEL_NOMINAL = 10.0   # ADU?
-THROUGHPUT_NOMINAL = 0.15    #
-
 __all__ = ["ExposureTime"]
 
 class ExposureTime(object):
@@ -73,11 +67,12 @@ class ExposureTime(object):
         self.conf = read_conf(conf)       
 
         # nominal values etc.
-        self.TEXP_NOMINAL = TEXP_NOMINAL
-        self.SEEING_NOMINAL = SEEING_NOMINAL
-        self.TRANSPARENCY_NOMINAL = TRANSPARENCY_NOMINAL
-        self.NOISE_LEVEL_NOMINAL = NOISE_LEVEL_NOMINAL
-        self.THROUGHPUT_NOMINAL = THROUGHPUT_NOMINAL
+        self.TEXP_NOMINAL = self.conf['qa']['exptime']['nominal']
+        self.SEEING_NOMINAL = self.conf['qa']['seeing']['nominal']
+        self.TRANSPARENCY_NOMINAL = self.conf['qa']['transparency']['nominal']
+        self.NOISE_LEVEL_NOMINAL = self.conf['qa']['sky']['noise_nominal']
+        self.BACKGROUND_LEVEL_NOMINAL = self.conf['qa']['sky']['background_nominal']
+        self.THROUGHPUT_NOMINAL = self.conf['qa']['throughput']['nominal']
         self.isFaint = isFaint
         self.df_fae = self.getFiberApertureEffectModel()
 
@@ -140,7 +135,7 @@ class ExposureTime(object):
         fae = np.interp(seeing, self.df_fae['fwhm'], self.df_fae['ap_eff_moffat'])
         return fae
     
-    def calcEffectiveExposureTime(self, visit, seeing, transparency, throughput, noise_level, mode='FLUXSTD'):
+    def calcEffectiveExposureTime(self, visit, seeing, transparency, throughput, background_level, noise_level, useBackground=True, useFluxstd=True):
         """        
         Parameters
         ----------
@@ -148,8 +143,10 @@ class ExposureTime(object):
             seeing : `float` seeing FWHM in arcsec.
             transparency : `float` transparency
             throughput : `float` throughput
-            noise_level : `float` sky-background noise_level
-
+            background_level : `float` sky background level
+            noise_level : `float` sky noise_level
+            useBackground : use background_level to calculate EET? (default=True)
+            useFluxstd : use throughput from FLUXSTDs to calculate EET? (default=True)
         Returns
         ----------
             t_eff: `float` effective exposure time 
@@ -159,21 +156,25 @@ class ExposureTime(object):
 
         """
         # calculate the relative change of the observing conditions
-        if mode == 'FLUXSTD':
+        if useFluxstd is True:
             xi = 1.0
             eta = throughput / self.THROUGHPUT_NOMINAL
         else:
             xi = self.calcFiberApertureEffect(seeing) / self.calcFiberApertureEffect(self.SEEING_NOMINAL)
             eta = transparency / self.TRANSPARENCY_NOMINAL
         noise = noise_level / self.NOISE_LEVEL_NOMINAL
-        
+        background = background_level / self.BACKGROUND_LEVEL_NOMINAL
+
         # calculate the effective exposure time
         if self.isFaint is False:
             # object is bright (so object limited)
             self.t_effective = self.TEXP_NOMINAL * xi * eta
         else:
             # object is faint (so background limited)
-            self.t_effective = self.TEXP_NOMINAL / noise**2 * xi**2 * eta**2
+            if useBackground is True:
+                self.t_effective = self.TEXP_NOMINAL / background * xi**2 * eta**2
+            else:
+                self.t_effective = self.TEXP_NOMINAL / noise**2 * xi**2 * eta**2
 
         # insert into qaDB
         df = pd.DataFrame(
