@@ -78,7 +78,7 @@ class Condition(object):
         self.df_throughput = None
         self.df_throughput_stats_pv = None
 
-        self.skyQaConf = self.conf["qa"]["sky"]["config"]
+        self.skyQaConf = self.conf["qa"]["sky"]
 
         logzero.logfile(self.conf['logger']['logfile'],
                         disableStderrLogger=True)
@@ -239,17 +239,17 @@ class Condition(object):
             fwhm = fwhm / (lamc / 6255.)**-0.20
             msk = msk * (gaia_color > -1.0) * (gaia_color < 2.5)
 
-        df = pd.DataFrame(
-            data={'pfs_visit_id': pfs_visit_id[msk],
-                  'agc_exposure_id': agc_exposure_id[msk],
-                  'agc_camera_id': agc_camera_id[msk],
-                  'taken_at': taken_at[msk],
-                  'sigma_a': sigma_a[msk],
-                  'sigma_b': sigma_b[msk],
-                  'sigma': sigma[msk],
-                  'fwhm': fwhm[msk],
-                  'flags': flags[msk],
-                  })
+        data = {'pfs_visit_id': pfs_visit_id[msk],
+                'agc_exposure_id': agc_exposure_id[msk],
+                'agc_camera_id': agc_camera_id[msk],
+                'taken_at': taken_at[msk],
+                'sigma_a': sigma_a[msk],
+                'sigma_b': sigma_b[msk],
+                'sigma': sigma[msk],
+                'fwhm': fwhm[msk],
+                'flags': flags[msk],
+                }
+        df = pd.DataFrame(data)
         if self.df_seeing is None:
             self.df_seeing = df.copy()
         else:
@@ -270,14 +270,13 @@ class Condition(object):
             fwhm_mean.append(fwhm[(agc_exposure_id == s) * msk].mean(skipna=True))
             fwhm_median.append(fwhm[(agc_exposure_id == s) * msk].median(skipna=True))
             fwhm_stddev.append(fwhm[(agc_exposure_id == s) * msk].std(skipna=True))
-        df = pd.DataFrame(
-            data={'taken_at_seq': taken_at_seq,
-                  'agc_exposure_seq': agc_exposure_seq,
-                  'visit_seq': visit_seq,
-                  'fwhm_mean': fwhm_mean,
-                  'fwhm_median': fwhm_median,
-                  'fwhm_sigma': fwhm_stddev,
-                  })
+            data = {'taken_at_seq': taken_at_seq,
+                            'agc_exposure_seq': agc_exposure_seq,
+                            'visit_seq': visit_seq,
+                            'fwhm_mean': fwhm_mean,
+                            'fwhm_median': fwhm_median,
+                            'fwhm_sigma': fwhm_stddev,}        
+            df = pd.DataFrame(data)
         if self.df_seeing_stats is None:
             self.df_seeing_stats = df.copy()
         else:
@@ -300,37 +299,34 @@ class Condition(object):
         fwhm_stddev_p_visit.append(dat.std(skipna=True))
 
         # insert into qaDB
-        df = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit,
-                  'pfs_visit_description': [pfs_visit_description],
-                  'pfs_design_id': [pfs_design_id],
-                  'issued_at': [issued_at],
-                  }
-        )
+        data = {'pfs_visit_id': visit_p_visit,
+                'pfs_visit_description': [pfs_visit_description],
+                'pfs_design_id': [pfs_design_id],
+                'issued_at': [issued_at],
+                }
+        df = pd.DataFrame(data)
         self.qadb.populateQATable('pfs_visit', df, updateDB=updateDB)
 
-        df = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit,
-                  'seeing_mean': fwhm_mean_p_visit,
-                  'seeing_median': fwhm_median_p_visit,
-                  'seeing_sigma': fwhm_stddev_p_visit,
-                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                  }
-        )
+        data = {'pfs_visit_id': visit_p_visit,
+                'seeing_mean': fwhm_mean_p_visit,
+                'seeing_median': fwhm_median_p_visit,
+                'seeing_sigma': fwhm_stddev_p_visit,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                }
+        df = pd.DataFrame(data)    
         df = df.fillna(-1.0).astype(float)
         self.qadb.populateQATable('seeing', df, updateDB=updateDB)
 
         if len(self.df_seeing_stats)>0:
-            df = pd.DataFrame(
-                data={'pfs_visit_id': self.df_seeing_stats.visit_seq,
-                    'agc_exposure_id': self.df_seeing_stats.agc_exposure_seq,
-                    'seeing_mean': self.df_seeing_stats.fwhm_mean,
-                    'seeing_median': self.df_seeing_stats.fwhm_median,
-                    'seeing_sigma': self.df_seeing_stats.fwhm_sigma,
-                    'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in self.df_seeing_stats.visit_seq],
-                    'taken_at': self.df_seeing_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                    }
-            )
+            data = {'pfs_visit_id': self.df_seeing_stats.visit_seq,
+                'agc_exposure_id': self.df_seeing_stats.agc_exposure_seq,
+                'seeing_mean': self.df_seeing_stats.fwhm_mean,
+                'seeing_median': self.df_seeing_stats.fwhm_median,
+                'seeing_sigma': self.df_seeing_stats.fwhm_sigma,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in self.df_seeing_stats.visit_seq],
+                'taken_at': self.df_seeing_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                }
+            df = pd.DataFrame(data)
             df = df.fillna(-1.0)
             self.qadb.populateQATable2(
                 'seeing_agc_exposure', df, updateDB=updateDB)
@@ -395,16 +391,15 @@ class Condition(object):
         transp[transp < 0.0] = 0.0
 
 
-        df = pd.DataFrame(
-            data={'pfs_visit_id': pfs_visit_id[msk],
-                  'agc_exposure_id': agc_exposure_id[msk],
-                  'agc_camera_id': agc_camera_id[msk],
-                  'taken_at': taken_at[msk],
-                  'guide_star_magnitude': mag1[msk],
-                  'estimated_magnitude': mag2[msk],
-                  'transp': transp[msk],
-                  'flags': flags[msk],
-                  })
+        data = {'pfs_visit_id': pfs_visit_id[msk],
+                'agc_exposure_id': agc_exposure_id[msk],
+                'agc_camera_id': agc_camera_id[msk],
+                'taken_at': taken_at[msk],
+                'guide_star_magnitude': mag1[msk],
+                'estimated_magnitude': mag2[msk],
+                'transp': transp[msk],
+                'flags': flags[msk],}
+        df = pd.DataFrame(data)
         if self.df_transparency is None:
             self.df_transparency = df.copy()
         else:
@@ -431,14 +426,14 @@ class Condition(object):
                 transp_mean.append(np.nan)
                 transp_median.append(np.nan)
                 transp_stddev.append(np.nan)
-        df = pd.DataFrame(
-            data={'taken_at_seq': taken_at_seq,
-                  'agc_exposure_seq': agc_exposure_seq,
-                  'visit_seq': visit_seq,
-                  'transp_mean': transp_mean,
-                  'transp_median': transp_median,
-                  'transp_sigma': transp_stddev,
-                  })
+        data = {'taken_at_seq': taken_at_seq,
+                'agc_exposure_seq': agc_exposure_seq,
+                'visit_seq': visit_seq,
+                'transp_mean': transp_mean,
+                'transp_median': transp_median,
+                'transp_sigma': transp_stddev,
+                }
+        df = pd.DataFrame(data)
         if self.df_transparency_stats is None:
             self.df_transparency_stats = df.copy()
         else:
@@ -464,28 +459,26 @@ class Condition(object):
                 transp_stddev_p_visit.append(np.nan)
 
         # insert into qaDB
-        df = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit,
-                  'transparency_mean': transp_mean_p_visit,
-                  'transparency_median': transp_median_p_visit,
-                  'transparency_sigma': transp_stddev_p_visit,
-                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                  }
-        )
+        data = {'pfs_visit_id': visit_p_visit,
+                'transparency_mean': transp_mean_p_visit,
+                'transparency_median': transp_median_p_visit,
+                'transparency_sigma': transp_stddev_p_visit,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                }
+        df = pd.DataFrame(data)
         df = df.fillna(-1.0).astype(float)
         self.qadb.populateQATable('transparency', df, updateDB=updateDB)
 
         if len(self.df_transparency_stats)>0:
-            df = pd.DataFrame(
-                data={'pfs_visit_id': self.df_transparency_stats.visit_seq,
-                    'agc_exposure_id': self.df_transparency_stats.agc_exposure_seq,
-                    'transparency_mean': self.df_transparency_stats.transp_mean,
-                    'transparency_median': self.df_transparency_stats.transp_median,
-                    'transparency_sigma': self.df_transparency_stats.transp_sigma,
-                    'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in self.df_transparency_stats.visit_seq],
-                    'taken_at': self.df_transparency_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                    }
-            )
+            data = {'pfs_visit_id': self.df_transparency_stats.visit_seq,
+                'agc_exposure_id': self.df_transparency_stats.agc_exposure_seq,
+                'transparency_mean': self.df_transparency_stats.transp_mean,
+                'transparency_median': self.df_transparency_stats.transp_median,
+                'transparency_sigma': self.df_transparency_stats.transp_sigma,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in self.df_transparency_stats.visit_seq],
+                'taken_at': self.df_transparency_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                }
+            df = pd.DataFrame(data)
             df = df.fillna(-1.0)
             self.qadb.populateQATable2(
                 'transparency_agc_exposure', df, updateDB=updateDB)
@@ -523,15 +516,14 @@ class Condition(object):
         flags = df['flags']
 
         ag_background = df['background']
-
-        df = pd.DataFrame(
-            data={'pfs_visit_id': pfs_visit_id,
-                  'agc_exposure_id': agc_exposure_id,
-                  'agc_camera_id': agc_camera_id,
-                  'taken_at': taken_at,
-                  'ag_background': ag_background,
-                  'flags': flags,
-                  })
+        data = {'pfs_visit_id': pfs_visit_id,
+                'agc_exposure_id': agc_exposure_id,
+                'agc_camera_id': agc_camera_id,
+                'taken_at': taken_at,
+                'ag_background': ag_background,
+                'flags': flags,
+                }
+        df = pd.DataFrame(data)
         if self.df_ag_background is None:
             self.df_ag_background = df.copy()
         else:
@@ -558,14 +550,14 @@ class Condition(object):
                 ag_background_mean.append(np.nan)
                 ag_background_median.append(np.nan)
                 ag_background_stddev.append(np.nan)
-        df = pd.DataFrame(
-            data={'taken_at_seq': taken_at_seq,
-                  'agc_exposure_seq': agc_exposure_seq,
-                  'visit_seq': visit_seq,
-                  'ag_background_mean': ag_background_mean,
-                  'ag_background_median': ag_background_median,
-                  'ag_background_sigma': ag_background_stddev,
-                  })
+        data = {'taken_at_seq': taken_at_seq,
+                'agc_exposure_seq': agc_exposure_seq,
+                'visit_seq': visit_seq,
+                'ag_background_mean': ag_background_mean,
+                'ag_background_median': ag_background_median,
+                'ag_background_sigma': ag_background_stddev,
+                }
+        df = pd.DataFrame(data)
         if self.df_ag_background_stats is None:
             self.df_ag_background_stats = df.copy()
         else:
@@ -591,13 +583,12 @@ class Condition(object):
                 ag_background_median_p_visit.append(np.nan)
                 ag_background_stddev_p_visit.append(np.nan)
 
-        df = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit,
-                  'ag_background_mean': ag_background_mean_p_visit,
-                  'ag_background_median': ag_background_median_p_visit,
-                  'ag_background_sigma': ag_background_stddev_p_visit
-                  }
-        )
+        data = {'pfs_visit_id': visit_p_visit,
+                'ag_background_mean': ag_background_mean_p_visit,
+                'ag_background_median': ag_background_median_p_visit,
+                'ag_background_sigma': ag_background_stddev_p_visit
+                }
+        df = pd.DataFrame(data)
         df = df.fillna(-1).astype(float)
         self.df_ag_background_stats_pv = df.copy()
         # if self.df_ag_background_stats_pv is None:
@@ -681,7 +672,7 @@ class Condition(object):
                 _rawDataDir = os.path.join(baseDir, obsdate)
                 _pfsArmDataDir = os.path.join(
                     rerun, 'pfsArm', obsdate, 'v%06d' % (v))
-                _pfsMergedDataDir = os.path.join(
+                _pfsMergedDataDir = os.path.join( 
                     rerun, 'pfsMerged', obsdate, 'v%06d' % (v))
                 _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
                 if os.path.isdir(_pfsArmDataDir) is False:
@@ -695,6 +686,17 @@ class Condition(object):
                                      spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
+                    _pfsDesignId = pfs_design_id
+                    _identity = Identity(visit=v)
+                    pfsMerged = PfsMerged.read(
+                        _identity, dirName=_pfsMergedDataDir)
+                    pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v,
+                                               dirName=_pfsConfigDataDir)
+                except:
+                    pfsMerged = None
+                    _pfsDesignId = None
+                    pfsConfig = None
+                try:
                     try:
                         pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
                     except:
@@ -703,17 +705,8 @@ class Condition(object):
                                              spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                              )
                         pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
-                    _pfsDesignId = pfs_design_id
-                    pfsMerged = PfsMerged.read(
-                        _identity, dirName=_pfsMergedDataDir)
-                    pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v,
-                                               dirName=_pfsConfigDataDir)
                 except:
                     pfsArm = None
-                    pfsMerged = None
-                    _pfsDesignId = None
-                    pfsConfig = None
-
                 # get raw data
                 rawFiles = glob.glob(os.path.join(
                     _rawDataDir, f'PFSA{v}??.fits'))
@@ -782,36 +775,32 @@ class Condition(object):
                     flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
                     data2s.append(np.nanstd(flx[flg]))
                 # store info into dataframe
-                df1 = pd.DataFrame(
-                    data={'pfs_visit_id': [v for _ in range(len(spectraSky))],
-                          'fiber_id': spectraSky.fiberId,
-                          'background_level': data1,
-                          }
-                )
+                data = {'pfs_visit_id': [v for _ in range(len(spectraSky))],
+                        'fiber_id': spectraSky.fiberId,
+                        'background_level': data1,
+                        }
+                df1 = pd.DataFrame(data)
                 if self.df_sky_background is None:
                     self.df_sky_background = df1.copy()
                 else:
                     self.df_sky_background = pd.concat(
                         [self.df_sky_background, df1.copy()], ignore_index=True)
 
-                df2 = pd.DataFrame(
-                    data={'pfs_visit_id': [v for _ in range(len(spectraSky))],
-                          'fiber_id': spectraSky.fiberId,
-                          'noise_level': data2,
-                          }
-                )
-                df2f = pd.DataFrame(
-                    data={'pfs_visit_id': [v for _ in range(len(spectraFluxstd))],
-                          'fiber_id': spectraFluxstd.fiberId,
-                          'noise_level': data2f,
-                          }
-                )
-                df2s = pd.DataFrame(
-                    data={'pfs_visit_id': [v for _ in range(len(spectraScience))],
-                          'fiber_id': spectraScience.fiberId,
-                          'noise_level': data2s,
-                          }
-                )
+                data = {'pfs_visit_id': [v for _ in range(len(spectraSky))],
+                        'fiber_id': spectraSky.fiberId,
+                        'noise_level': data2,
+                        }
+                df2 = pd.DataFrame(data)
+                data = {'pfs_visit_id': [v for _ in range(len(spectraFluxstd))],
+                        'fiber_id': spectraFluxstd.fiberId,
+                        'noise_level': data2f,
+                        }
+                df2f = pd.DataFrame(data)
+                data = {'pfs_visit_id': [v for _ in range(len(spectraScience))],
+                        'fiber_id': spectraScience.fiberId,
+                        'noise_level': data2s,
+                        }
+                df2s = pd.DataFrame(data)
                 if self.df_sky_noise is None:
                     self.df_sky_noise = df2.copy()
                 else:
@@ -844,17 +833,16 @@ class Condition(object):
                 logger.info(f'visit={v} skipped...')
 
         # populate database (sky table)
-        df1 = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit,
-                  'sky_background_mean': sky_mean_p_visit,
-                  'sky_background_median': sky_median_p_visit,
-                  'sky_background_sigma': sky_stddev_p_visit,
-                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                  'agc_background_mean': self.df_ag_background_stats_pv['ag_background_mean'].values,
-                  'agc_background_median': self.df_ag_background_stats_pv['ag_background_median'].values,
-                  'agc_background_sigma': self.df_ag_background_stats_pv['ag_background_sigma'].values,
-                  }
-        )
+        data = {'pfs_visit_id': visit_p_visit,
+                'sky_background_mean': sky_mean_p_visit,
+                'sky_background_median': sky_median_p_visit,
+                'sky_background_sigma': sky_stddev_p_visit,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                'agc_background_mean': self.df_ag_background_stats_pv['ag_background_mean'].values,
+                'agc_background_median': self.df_ag_background_stats_pv['ag_background_median'].values,
+                'agc_background_sigma': self.df_ag_background_stats_pv['ag_background_sigma'].values,
+                }
+        df1 = pd.DataFrame(data)
         self.qadb.populateQATable('sky', df1, updateDB=updateDB)
         if self.df_sky_background_stats_pv is None:
             self.df_sky_background_stats_pv = df1.copy()
@@ -863,14 +851,13 @@ class Condition(object):
                 [self.df_sky_background_stats_pv, df1.copy()], ignore_index=True)
 
         # populate database (noise table)
-        df2 = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit,
-                  'noise_mean': noise_mean_p_visit,
-                  'noise_median': noise_median_p_visit,
-                  'noise_sigma': noise_stddev_p_visit,
-                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                  }
-        )
+        data = {'pfs_visit_id': visit_p_visit,
+                'noise_mean': noise_mean_p_visit,
+                'noise_median': noise_median_p_visit,
+                'noise_sigma': noise_stddev_p_visit,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                }
+        df2 = pd.DataFrame(data)
         self.qadb.populateQATable('noise', df2, updateDB=updateDB)
         if self.df_sky_noise_stats_pv is None:
             self.df_sky_noise_stats_pv = df2.copy()
@@ -970,14 +957,6 @@ class Condition(object):
                                      spectrograph=self.skyQaConf["ref_spectrograph_sky"]
                                      )
                 try:
-                    try:
-                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
-                    except:
-                        _identity = Identity(visit=v,
-                                             arm="m",
-                                             spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                             )
-                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
                     _pfsDesignId = pfs_design_id
                     pfsMerged = PfsMerged.read(
                         _identity, dirName=_pfsMergedDataDir)
@@ -989,11 +968,21 @@ class Condition(object):
                     else:
                         pfsFluxReference = None
                 except:
-                    pfsArm = None
                     pfsMerged = None
                     _pfsDesignId = None
                     pfsConfig = None
                     pfsFluxReference = None
+                try:
+                    try:
+                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    except:
+                        _identity = Identity(visit=v,
+                                             arm="m",
+                                             spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                             )
+                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                except:
+                    pfsArm = None
             # calculate the throughput from FLUXSTD spectra
             logger.info(f"calculating throughput for visit={v}...")
 
@@ -1056,11 +1045,11 @@ class Condition(object):
                     throughput_median_p_visit.append(-1)
                     throughput_stddev_p_visit.append(-1)
                 # store info into dataframe
+                data = {'pfs_visit_id': [v for _ in range(len(SpectraFluxstd))],
+                        'fiber_id': SpectraFluxstd.fiberId,
+                        'throughput': throughput,
+                        }
                 df = pd.DataFrame(
-                    data={'pfs_visit_id': [v for _ in range(len(SpectraFluxstd))],
-                          'fiber_id': SpectraFluxstd.fiberId,
-                          'throughput': throughput,
-                          }
                 )
                 if self.df_throughput is None:
                     self.df_throughput = df.copy()
@@ -1071,14 +1060,13 @@ class Condition(object):
                 logger.info(f'visit={v} skipped...')
 
         # populate database (throughput table)
-        df = pd.DataFrame(
-            data={'pfs_visit_id': visit_p_visit,
-                  'throughput_mean': throughput_mean_p_visit,
-                  'throughput_median': throughput_median_p_visit,
-                  'throughput_sigma': throughput_stddev_p_visit,
-                  'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                  }
-        )
+        data = {'pfs_visit_id': visit_p_visit,
+                'throughput_mean': throughput_mean_p_visit,
+                'throughput_median': throughput_median_p_visit,
+                'throughput_sigma': throughput_stddev_p_visit,
+                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                }
+        df = pd.DataFrame(data)
         self.qadb.populateQATable('throughput', df, updateDB=updateDB)
         if self.df_throughput_stats_pv is None:
             self.df_throughput_stats_pv = df.copy()
