@@ -212,6 +212,8 @@ class Condition(object):
         magnitude = df['guide_star_magnitude']
         gaia_color = df['guide_star_color']
         
+        print(f'    {len(seq)} agc_exposures  {len(df)} objects')
+
         # calculate FWHM (reference: Magnier et al. 2020, ApJS, 251, 5)
         g1 = df['central_image_moment_20_pix'] + \
             df['central_image_moment_02_pix']
@@ -270,13 +272,14 @@ class Condition(object):
             fwhm_mean.append(fwhm[(agc_exposure_id == s) * msk].mean(skipna=True))
             fwhm_median.append(fwhm[(agc_exposure_id == s) * msk].median(skipna=True))
             fwhm_stddev.append(fwhm[(agc_exposure_id == s) * msk].std(skipna=True))
-            data = {'taken_at_seq': taken_at_seq,
-                            'agc_exposure_seq': agc_exposure_seq,
-                            'visit_seq': visit_seq,
-                            'fwhm_mean': fwhm_mean,
-                            'fwhm_median': fwhm_median,
-                            'fwhm_sigma': fwhm_stddev,}        
-            df = pd.DataFrame(data)
+
+        data = {'taken_at_seq': taken_at_seq,
+                        'agc_exposure_seq': agc_exposure_seq,
+                        'visit_seq': visit_seq,
+                        'fwhm_mean': fwhm_mean,
+                        'fwhm_median': fwhm_median,
+                        'fwhm_sigma': fwhm_stddev,}        
+        df = pd.DataFrame(data)
         if self.df_seeing_stats is None:
             self.df_seeing_stats = df.copy()
         else:
@@ -317,6 +320,12 @@ class Condition(object):
         df = df.fillna(-1.0).astype(float)
         self.qadb.populateQATable('seeing', df, updateDB=updateDB)
 
+        if self.df_seeing_stats_pv is None:
+            self.df_seeing_stats_pv = df.copy()
+        else:
+            self.df_seeing_stats_pv = pd.concat(
+                [self.df_seeing_stats_pv, df], ignore_index=True)
+
         if len(self.df_seeing_stats)>0:
             data = {'pfs_visit_id': self.df_seeing_stats.visit_seq,
                 'agc_exposure_id': self.df_seeing_stats.agc_exposure_seq,
@@ -330,12 +339,6 @@ class Condition(object):
             df = df.fillna(-1.0)
             self.qadb.populateQATable2(
                 'seeing_agc_exposure', df, updateDB=updateDB)
-
-            if self.df_seeing_stats_pv is None:
-                self.df_seeing_stats_pv = df.copy()
-            else:
-                self.df_seeing_stats_pv = pd.concat(
-                    [self.df_seeing_stats_pv, df], ignore_index=True)
 
     def calcTransparency(self, visit, corrColor=True, updateDB=True):
         """Calculate Transparency based on AGC measurements
@@ -468,6 +471,11 @@ class Condition(object):
         df = pd.DataFrame(data)
         df = df.fillna(-1.0).astype(float)
         self.qadb.populateQATable('transparency', df, updateDB=updateDB)
+        if self.df_transparency_stats_pv is None:
+            self.df_transparency_stats_pv = df.copy()
+        else:
+            self.df_transparency_stats_pv = pd.concat(
+                [self.df_transparency_stats_pv, df], ignore_index=True)
 
         if len(self.df_transparency_stats)>0:
             data = {'pfs_visit_id': self.df_transparency_stats.visit_seq,
@@ -482,12 +490,6 @@ class Condition(object):
             df = df.fillna(-1.0)
             self.qadb.populateQATable2(
                 'transparency_agc_exposure', df, updateDB=updateDB)
-
-            if self.df_transparency_stats_pv is None:
-                self.df_transparency_stats_pv = df.copy()
-            else:
-                self.df_transparency_stats_pv = pd.concat(
-                    [self.df_transparency_stats_pv, df], ignore_index=True)
 
     def calcAgBackground(self, visit):
         """Calculate Sky Background level based on AGC images
@@ -590,13 +592,13 @@ class Condition(object):
                 }
         df = pd.DataFrame(data)
         df = df.fillna(-1).astype(float)
-        self.df_ag_background_stats_pv = df.copy()
-        # if self.df_ag_background_stats_pv is None:
-        #    self.df_ag_background_stats_pv = df.copy()
-        # else:
-        #    self.df_ag_background_stats_pv = pd.concat([self.df_ag_background_stats_pv, df], ignore_index=True)
+        #self.df_ag_background_stats_pv = df.copy()
+        if self.df_ag_background_stats_pv is None:
+            self.df_ag_background_stats_pv = df.copy()
+        else:
+            self.df_ag_background_stats_pv = pd.concat([self.df_ag_background_stats_pv, df], ignore_index=True)
 
-    def calcSkyBackground(self, visit, usePfsMerged=True, usePfsSingle=False, updateDB=True):
+    def calcSkyBackground(self, visit, useButler=False, usePfsMerged=True, usePfsSingle=False, updateDB=True):
         """
         Calculate the sky background level based on the flux of SKY fibers and the AG background level.
 
@@ -604,6 +606,8 @@ class Condition(object):
         ----------
         visit : int
             The pfs_visit_id for which to calculate the sky background level.
+        useButler : bool, optional
+            Flag indicating whether to use the butler to handle PFS data. Default is False.
         usePfsMerged : bool, optional
             Flag indicating whether to use the merged PFS data. Default is True.
         usePfsSingle : bool, optional
@@ -626,10 +630,13 @@ class Condition(object):
         pfsConfigDir = _drpDataConf["pfsConfigDir"]
         rerun = os.path.join(baseDir, 'rerun', _drpDataConf["rerun"])
         calibRoot = os.path.join(baseDir, _drpDataConf["calib"])
-        try:
-            import lsst.daf.persistence as dafPersist
-            butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
-        except:
+        if useButler is True:
+            try:
+                import lsst.daf.persistence as dafPersist
+                butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
+            except:
+                butler = None
+        else:
             butler = None
 
         # get visit information
@@ -662,7 +669,7 @@ class Condition(object):
         noise_stddev_p_visit = []
 
         for v in np.unique(pfs_visit_id):
-            if butler is not None:
+            if butler is not None and useButler is True:
                 dataId = dict(visit=v, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
                               )
                 pfsArm = butler.get("pfsArm", dataId)
@@ -844,9 +851,9 @@ class Condition(object):
                 'sky_background_median': sky_median_p_visit,
                 'sky_background_sigma': sky_stddev_p_visit,
                 'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
-                'agc_background_mean': self.df_ag_background_stats_pv['ag_background_mean'].values,
-                'agc_background_median': self.df_ag_background_stats_pv['ag_background_median'].values,
-                'agc_background_sigma': self.df_ag_background_stats_pv['ag_background_sigma'].values,
+                'agc_background_mean': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_mean'].values,
+                'agc_background_median': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_median'].values,
+                'agc_background_sigma': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_sigma'].values,
                 }
         df1 = pd.DataFrame(data)
         self.qadb.populateQATable('sky', df1, updateDB=updateDB)
@@ -871,7 +878,7 @@ class Condition(object):
             self.df_sky_noise_stats_pv = pd.concat(
                 [self.df_sky_noise_stats_pv, df2.copy()], ignore_index=True)
 
-    def calcThroughput(self, visit, usePfsMerged=True, usePfsFluxReference=True, updateDB=True):
+    def calcThroughput(self, visit, useButler=False, usePfsMerged=True, usePfsFluxReference=True, updateDB=True):
         """
         Calculate total throughput based on FLUXSTD fibers flux
 
@@ -879,6 +886,8 @@ class Condition(object):
         ----------
         visit : int
             The pfs_visit_id for which to calculate the total throughput.
+        useButler : bool, optional
+            Flag indicating whether to use the butler to handle PFS data. Default is False.
         usePfsMerged : bool, optional
             Flag indicating whether to use the merged PFS data. Default is True.
         usePfsFluxReference : bool, optional
@@ -902,10 +911,13 @@ class Condition(object):
         pfsConfigDir = _drpDataConf["pfsConfigDir"]
         rerun = os.path.join(baseDir, 'rerun', _drpDataConf["rerun"])
         calibRoot = os.path.join(baseDir, _drpDataConf["calib"])
-        try:
-            import lsst.daf.persistence as dafPersist
-            butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
-        except:
+        if useButler is True:
+            try:
+                import lsst.daf.persistence as dafPersist
+                butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
+            except:
+                butler = None
+        else:
             butler = None
 
         # get visit information
@@ -931,7 +943,7 @@ class Condition(object):
         # calculate throughput (stddev over fibers) per visit
         throughput_stddev_p_visit = []
         for v in np.unique(pfs_visit_id):
-            if butler is not None:
+            if butler is not None and useButler is True:
                 dataId = dict(visit=v, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
                               )
                 pfsArm = butler.get("pfsArm", dataId)
@@ -1517,7 +1529,7 @@ class Condition(object):
     def getConditionDrp(self, visits, showPlot=True,
                         xaxis='taken_at', cc='cameraId',
                         skipCalcSkyBackground=False, skipCalcThroughput=False,
-                        saveFig=False, figName='', dirName='.', usePfsMerged=True,
+                        saveFig=False, figName='', dirName='.', useButler=False, usePfsMerged=True,
                         resetVisitList=True, closeDB=False, updateDB=True):
         """Calculate various observing conditions such as seeing, transparency, etc. 
 
@@ -1541,6 +1553,10 @@ class Condition(object):
             The name of the figure file.
         dirName : str, optional
             The directory to save the figure file.
+        useButler : bool, optional
+            Whether to use butler to read DRP products
+        usePfsMerged : bool, optional
+            Whether to use pfsMerged to calculate
         resetVisitList : bool, optional (default: True)
             Whether to reset the visit list before calculating the observing conditions.
         closeDB : bool, optional (default: False)
@@ -1565,10 +1581,10 @@ class Condition(object):
             if visit not in self.visitList:
                 # get background level
                 if skipCalcSkyBackground == False:
-                    self.calcSkyBackground(visit=visit, usePfsMerged=usePfsMerged, updateDB=updateDB)
+                    self.calcSkyBackground(visit=visit, useButler=useButler, usePfsMerged=usePfsMerged, updateDB=updateDB)
                 # get throughput
                 if skipCalcThroughput == False:
-                    self.calcThroughput(visit=visit, usePfsMerged=usePfsMerged, updateDB=updateDB)
+                    self.calcThroughput(visit=visit, useButler=useButler, usePfsMerged=usePfsMerged, updateDB=updateDB)
                 # append visit
                 self.visitList.append(visit)
             else:

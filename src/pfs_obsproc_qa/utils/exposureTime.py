@@ -135,7 +135,7 @@ class ExposureTime(object):
         fae = np.interp(seeing, self.df_fae['fwhm'], self.df_fae['ap_eff_moffat'])
         return fae
     
-    def calcEffectiveExposureTime(self, visit, seeing, transparency, throughput, background_level, noise_level, useBackground=True, useFluxstd=True):
+    def calcEffectiveExposureTime(self, visit, seeing, transparency, throughput, background_level, noise_level, useBackground=True, useFluxstd=True, updateDB=True):
         """        
         Parameters
         ----------
@@ -182,7 +182,7 @@ class ExposureTime(object):
                   "nominal_exposure_time": [self.t_nominal],
                   "effective_exposure_time": [self.t_effective]
                   })
-        self.qadb.populateQATable('exposure_time', df)
+        self.qadb.populateQATable('exposure_time', df, updateDB=updateDB)
 
         return self.t_effective
 
