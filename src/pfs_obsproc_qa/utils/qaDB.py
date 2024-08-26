@@ -25,7 +25,7 @@ class QaDB(object):
 
     def __init__(self, conf):
         self.conf = conf
-        self._engine = create_engine(get_url(self.conf))
+        self._engine = create_engine(get_url(self.conf), future=True)
         self._conn = self._engine.raw_connection()
 
     def query(self, sqlCmd):
