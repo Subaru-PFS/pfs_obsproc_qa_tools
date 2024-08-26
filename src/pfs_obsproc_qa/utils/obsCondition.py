@@ -314,7 +314,7 @@ class Condition(object):
                 'seeing_mean': fwhm_mean_p_visit,
                 'seeing_median': fwhm_median_p_visit,
                 'seeing_sigma': fwhm_stddev_p_visit,
-                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                'wavelength_ref': [self.conf["qa"]["seeing"]["ref_wav"] for _ in visit_p_visit],
                 }
         df = pd.DataFrame(data)    
         df = df.fillna(-1.0).astype(float)
@@ -332,7 +332,7 @@ class Condition(object):
                 'seeing_mean': self.df_seeing_stats.fwhm_mean,
                 'seeing_median': self.df_seeing_stats.fwhm_median,
                 'seeing_sigma': self.df_seeing_stats.fwhm_sigma,
-                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in self.df_seeing_stats.visit_seq],
+                'wavelength_ref': [self.conf["qa"]["seeing"]["ref_wav"] for _ in self.df_seeing_stats.visit_seq],
                 'taken_at': self.df_seeing_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 }
             df = pd.DataFrame(data)
@@ -466,7 +466,7 @@ class Condition(object):
                 'transparency_mean': transp_mean_p_visit,
                 'transparency_median': transp_median_p_visit,
                 'transparency_sigma': transp_stddev_p_visit,
-                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                'wavelength_ref': [self.conf["qa"]["transparency"]["ref_wav"] for _ in visit_p_visit],
                 }
         df = pd.DataFrame(data)
         df = df.fillna(-1.0).astype(float)
@@ -483,7 +483,7 @@ class Condition(object):
                 'transparency_mean': self.df_transparency_stats.transp_mean,
                 'transparency_median': self.df_transparency_stats.transp_median,
                 'transparency_sigma': self.df_transparency_stats.transp_sigma,
-                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in self.df_transparency_stats.visit_seq],
+                'wavelength_ref': [self.conf["qa"]["transparency"]["ref_wav"] for _ in self.df_transparency_stats.visit_seq],
                 'taken_at': self.df_transparency_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 }
             df = pd.DataFrame(data)
@@ -760,8 +760,8 @@ class Condition(object):
                 data1 = []
                 data2 = []
                 for wav, flx, sky, msk in zip(spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
-                    wc = self.skyQaConf["ref_wav_sky"]
-                    dw = self.skyQaConf["ref_dwav_sky"]
+                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
+                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
                     # FIXME (SKYLINE should be masked)
                     flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
                     df = pd.DataFrame({'sky': sky[flg], 'flx': flx[flg]})
@@ -775,15 +775,15 @@ class Condition(object):
                 logger.info(f"{len(data1)} SKYs are used to calculate")
                 data2f = []
                 for wav, flx, msk in zip(spectraFluxstd.wavelength, spectraFluxstd.flux, spectraFluxstd.mask):
-                    wc = self.skyQaConf["ref_wav_sky"]
-                    dw = self.skyQaConf["ref_dwav_sky"]
+                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
+                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
                     # FIXME (SKYLINE should be masked)
                     flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
                     data2f.append(np.nanstd(flx[flg]))
                 data2s = []
                 for wav, flx, msk in zip(spectraScience.wavelength, spectraScience.flux, spectraScience.mask):
-                    wc = self.skyQaConf["ref_wav_sky"]
-                    dw = self.skyQaConf["ref_dwav_sky"]
+                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
+                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
                     # FIXME (SKYLINE should be masked)
                     flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
                     data2s.append(np.nanstd(flx[flg]))
@@ -847,10 +847,10 @@ class Condition(object):
 
         # populate database (sky table)
         data = {'pfs_visit_id': visit_p_visit,
-                'sky_background_mean': sky_mean_p_visit,
-                'sky_background_median': sky_median_p_visit,
-                'sky_background_sigma': sky_stddev_p_visit,
-                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                'sky_background_r_mean': sky_mean_p_visit,
+                'sky_background_r_median': sky_median_p_visit,
+                'sky_background_r_sigma': sky_stddev_p_visit,
+                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"] for _ in visit_p_visit],
                 'agc_background_mean': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_mean'].values,
                 'agc_background_median': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_median'].values,
                 'agc_background_sigma': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_sigma'].values,
@@ -865,10 +865,10 @@ class Condition(object):
 
         # populate database (noise table)
         data = {'pfs_visit_id': visit_p_visit,
-                'noise_mean': noise_mean_p_visit,
-                'noise_median': noise_median_p_visit,
-                'noise_sigma': noise_stddev_p_visit,
-                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                'noise_r_mean': noise_mean_p_visit,
+                'noise_r_median': noise_median_p_visit,
+                'noise_r_sigma': noise_stddev_p_visit,
+                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"] for _ in visit_p_visit],
                 }
         df2 = pd.DataFrame(data)
         self.qadb.populateQATable('noise', df2, updateDB=updateDB)
@@ -1004,7 +1004,7 @@ class Condition(object):
             # calculate the throughput from FLUXSTD spectra
             logger.info(f"calculating throughput for visit={v}...")
 
-            ref_wav = self.skyQaConf["ref_wav_sky"]
+            ref_wav = self.conf["qa"]["ref_wav"]["ref_wav_r"]
             if ref_wav < 550.:
                 idx_psfFlux = 0
             elif ref_wav < 700.:
@@ -1034,8 +1034,8 @@ class Condition(object):
             if SpectraFluxstd is not None:
                 throughput = []
                 for fid, wav, flx, msk in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux, SpectraFluxstd.mask):
-                    wc = self.skyQaConf["ref_wav_sky"]
-                    dw = self.skyQaConf["ref_dwav_sky"]
+                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
+                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
                     if usePfsFluxReference is True:
                         wav_pfr = np.array(
                             pfsFluxReference.wavelength.tolist())
@@ -1079,10 +1079,10 @@ class Condition(object):
 
         # populate database (throughput table)
         data = {'pfs_visit_id': visit_p_visit,
-                'throughput_mean': throughput_mean_p_visit,
-                'throughput_median': throughput_median_p_visit,
-                'throughput_sigma': throughput_stddev_p_visit,
-                'wavelength_ref': [self.skyQaConf["ref_wav_sky"] for _ in visit_p_visit],
+                'throughput_r_mean': throughput_mean_p_visit,
+                'throughput_r_median': throughput_median_p_visit,
+                'throughput_r_sigma': throughput_stddev_p_visit,
+                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"] for _ in visit_p_visit],
                 }
         df = pd.DataFrame(data)
         self.qadb.populateQATable('throughput', df, updateDB=updateDB)
