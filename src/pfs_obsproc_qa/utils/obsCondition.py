@@ -6,7 +6,7 @@ import pandas as pd
 import toml
 import matplotlib.pyplot as plt
 from pfs.datamodel import Identity, PfsArm, PfsMerged
-from pfs.datamodel.pfsConfig import PfsConfig, TargetType
+from pfs.datamodel.pfsConfig import PfsConfig, FiberStatus, TargetType
 from pfs.datamodel.pfsFluxReference import PfsFluxReference
 from .opDB import OpDB
 from .qaDB import QaDB
@@ -728,10 +728,16 @@ class Condition(object):
                     pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
                 spectraScience = pfsMerged.select(
                     pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
+                fiberStatusSky = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraSky.fiberId])
+                fiberStatusFluxstd = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraFluxstd.fiberId])
+                fiberStatusScience = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraScience.fiberId])
             else:
                 spectraSky = None
                 spectraFluxstd = None
                 spectraScience = None
+                fiberStatusSky = None
+                fiberStatusFluxstd = None
+                fiberStatusScience = None
         else:
             logger.info(f"pfsArm is used")
             if pfsArm is not None:
@@ -741,12 +747,17 @@ class Condition(object):
                     pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
                 spectraScience = pfsArm.select(
                     pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
+                fiberStatusSky = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraSky.fiberId])
+                fiberStatusFluxstd = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraFluxstd.fiberId])
+                fiberStatusScience = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraScience.fiberId])
             else:
                 spectraSky = None
                 spectraFluxstd = None
                 spectraScience = None
+                fiberStatusSky = None
+                fiberStatusFluxstd = None
+                fiberStatusScience = None
         if spectraSky is not None:
-
             # background noise level measured from SKY fibers
             data1 = []
             data2 = []
@@ -843,6 +854,7 @@ class Condition(object):
             noise_stddev = []
             for i,arm in enumerate(["b", "r", "n", "m"]):
                 data = {'fiber_id': spectraSky.fiberId,
+                        'fiber_status': fiberStatusSky,
                         'background_level': data1[i],
                         }
                 df1 = pd.DataFrame(data)
@@ -853,14 +865,17 @@ class Condition(object):
                     self.df_sky_background = pd.concat([self.df_sky_background, df1.copy()], ignore_index=True)
 
                 data = {'fiber_id': spectraSky.fiberId,
+                        'fiber_status': fiberStatusSky,
                         'noise_level': data2[i],
                         }
                 df2 = pd.DataFrame(data)
                 data = {'fiber_id': spectraFluxstd.fiberId,
+                        'fiber_status': fiberStatusFluxstd,
                         'noise_level': data2f,
                         }
                 df2f = pd.DataFrame(data)
                 data = {'fiber_id': spectraScience.fiberId,
+                        'fiber_status': fiberStatusScience,
                         'noise_level': data2s,
                         }
                 df2s = pd.DataFrame(data)
@@ -881,13 +896,13 @@ class Condition(object):
                 #else:
                 #    self.df_science_noise = pd.concat([self.df_science_noise, df2s.copy()], ignore_index=True)
                 # sky = df1['background_level']
-                dat = df1.background_level
+                dat = df1.background_level[df1.fiber_status==FiberStatus.GOOD]
                 val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
                 sky_mean.append(val_ave)
                 sky_median.append(val_med)
                 sky_stddev.append(val_std)
                 # noise = df2['noise_level']
-                dat = df2.noise_level
+                dat = df2.noise_level[df2.fiber_status==FiberStatus.GOOD]
                 val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
                 noise_mean.append(val_ave)
                 noise_median.append(val_med)
@@ -1090,15 +1105,19 @@ class Condition(object):
             if pfsMerged is not None:
                 SpectraFluxstd = pfsMerged.select(
                     pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                fiberStatusFluxstd = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in SpectraFluxstd.fiberId])
             else:
                 SpectraFluxstd = None
+                fiberStatusFluxstd = None
         else:
             logger.info(f"pfsArm is used")
             if pfsArm is not None:
                 SpectraFluxstd = pfsArm.select(
                     pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                fiberStatusFluxstd = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in SpectraFluxstd.fiberId])
             else:
                 SpectraFluxstd = None
+                fiberStatusFluxstd = None
 
         if SpectraFluxstd is not None:
             throughput = []
@@ -1136,6 +1155,7 @@ class Condition(object):
 
             for i,arm in enumerate(["b", "r", "n", "m"]):
                 data = {'fiber_id': SpectraFluxstd.fiberId,
+                        'fiber_status': fiberStatusFluxstd,
                         'throughput': throughput[i],
                         }
                 df1 = pd.DataFrame(data)
@@ -1151,6 +1171,7 @@ class Condition(object):
             # store info into dataframe
             data = {'pfs_visit_id': [visit for _ in range(len(SpectraFluxstd))],
                     'fiber_id': SpectraFluxstd.fiberId,
+                    'fiber_status': fiberStatusFluxstd,                   
                     'throughput': throughput,
                     }
             df = pd.DataFrame(
