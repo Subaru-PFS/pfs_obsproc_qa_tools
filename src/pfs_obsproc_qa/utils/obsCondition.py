@@ -14,6 +14,7 @@ from .utils import read_conf
 import logzero
 from logzero import logger
 from astropy.io import fits
+from astropy.stats import sigma_clip, sigma_clipped_stats
 import glob
 
 __all__ = ["Condition"]
@@ -598,7 +599,7 @@ class Condition(object):
         else:
             self.df_ag_background_stats_pv = pd.concat([self.df_ag_background_stats_pv, df], ignore_index=True)
 
-    def calcSkyBackground(self, visit, useButler=False, usePfsMerged=True, usePfsSingle=False, updateDB=True):
+    def calcSkyBackground(self, visit, useButler=False, usePfsMerged=True, usePfsSingle=False, calcMode='iqr', updateDB=True):
         """
         Calculate the sky background level based on the flux of SKY fibers and the AG background level.
 
@@ -612,6 +613,8 @@ class Condition(object):
             Flag indicating whether to use the merged PFS data. Default is True.
         usePfsSingle : bool, optional
             Flag indicating whether to use the single PFS data. Default is False.
+        calcMode : str, optional
+            Calculation method for statistics (clipped/iqr)
         updateDB : bool, optional
             Flag indicating whether to update the database. Default is True.
 
@@ -654,206 +657,266 @@ class Condition(object):
         else:
             pfs_design_id = None
         
-        visit_p_visit = []
-        # calculate background level (mean over fibers) per visit
-        sky_mean_p_visit = []
-        # calculate background level (median over fibers) per visit
-        sky_median_p_visit = []
-        # calculate background level (stddev over fibers) per visit
-        sky_stddev_p_visit = []
-        # calculate noise level (mean over fibers) per visit
-        noise_mean_p_visit = []
-        # calculate noise level (median over fibers) per visit
-        noise_median_p_visit = []
-        # calculate noise level (stddev over fibers) per visit
-        noise_stddev_p_visit = []
-
-        for v in np.unique(pfs_visit_id):
-            if butler is not None and useButler is True:
-                dataId = dict(visit=v, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
-                              )
-                pfsArm = butler.get("pfsArm", dataId)
-                pfsMerged = butler.get("pfsMerged", dataId)
-                pfsConfig = butler.get("pfsConfig", dataId)
-            else:
-                _rawDataDir = os.path.join(baseDir, obsdate)
-                _pfsArmDataDir = os.path.join(
-                    rerun, 'pfsArm', obsdate, 'v%06d' % (v))
-                _pfsMergedDataDir = os.path.join( 
-                    rerun, 'pfsMerged', obsdate, 'v%06d' % (v))
-                _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
-                if os.path.isdir(_pfsArmDataDir) is False:
-                    _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
-                if os.path.isdir(_pfsMergedDataDir) is False:
-                    _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
-                if os.path.isdir(_pfsConfigDataDir) is False:
-                    _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
-                _identity = Identity(visit=v,
-                                     arm=self.skyQaConf["ref_arm_sky"],
-                                     spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                     )
+        # check whether butler is available or not
+        if butler is not None and useButler is True:
+            dataId = dict(visit=visit, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
+                            )
+            pfsArm = butler.get("pfsArm", dataId)
+            pfsMerged = butler.get("pfsMerged", dataId)
+            pfsConfig = butler.get("pfsConfig", dataId)
+        else:
+            _rawDataDir = os.path.join(baseDir, obsdate)
+            _pfsArmDataDir = os.path.join(
+                rerun, 'pfsArm', obsdate, 'v%06d' % (visit))
+            _pfsMergedDataDir = os.path.join( 
+                rerun, 'pfsMerged', obsdate, 'v%06d' % (visit))
+            _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
+            if os.path.isdir(_pfsArmDataDir) is False:
+                _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
+            if os.path.isdir(_pfsMergedDataDir) is False:
+                _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
+            if os.path.isdir(_pfsConfigDataDir) is False:
+                _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
+            _identity = Identity(visit=visit,
+                                    arm=self.skyQaConf["ref_arm_sky"],
+                                    spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                    )
+            try:
+                _pfsDesignId = pfs_design_id
+                _identity = Identity(visit=visit)
+                pfsMerged = PfsMerged.read(
+                    _identity, dirName=_pfsMergedDataDir)
+                pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=visit,
+                                            dirName=_pfsConfigDataDir)
+            except:
+                pfsMerged = None
+                _pfsDesignId = None
+                pfsConfig = None
+            try:
                 try:
-                    _pfsDesignId = pfs_design_id
-                    _identity = Identity(visit=v)
-                    pfsMerged = PfsMerged.read(
-                        _identity, dirName=_pfsMergedDataDir)
-                    pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v,
-                                               dirName=_pfsConfigDataDir)
+                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
                 except:
-                    pfsMerged = None
-                    _pfsDesignId = None
-                    pfsConfig = None
-                try:
-                    try:
-                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
-                    except:
-                        _identity = Identity(visit=v,
-                                             arm="m",
-                                             spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                             )
-                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
-                except:
-                    pfsArm = None
-                # get raw data
-                rawFiles = glob.glob(os.path.join(
-                    _rawDataDir, f'PFSA{v}??.fits'))
-                if len(rawFiles) > 0:
-                    rawFile = rawFiles[0]
-                else:
-                    rawFile = None
-
-            # get moon condition
-            self.getMoonCondition(v, rawFile, updateDB=updateDB)
-
-            # get AG background level
-            self.calcAgBackground(visit=v)
-
-            # calculate the typical sky background level
-            logger.info(f"calculating sky background level for visit={v}...")
-            if usePfsMerged is True:
-                logger.info(f"pfsMerged is used")
-                if pfsMerged is not None:
-                    spectraSky = pfsMerged.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.SKY)
-                    spectraFluxstd = pfsMerged.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
-                    spectraScience = pfsMerged.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
-                else:
-                    spectraSky = None
-                    spectraFluxstd = None
-                    spectraScience = None
+                    _identity = Identity(visit=visit,
+                                         arm="m",
+                                         spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                         )
+                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+            except:
+                pfsArm = None
+            # get raw data
+            rawFiles = glob.glob(os.path.join(
+                _rawDataDir, f'PFSA{visit:06d}??.fits'))
+            if len(rawFiles) > 0:
+                rawFile = rawFiles[0]
             else:
-                logger.info(f"pfsArm is used")
-                if pfsArm is not None:
-                    spectraSky = pfsArm.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.SKY)
-                    spectraFluxstd = pfsArm.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
-                    spectraScience = pfsArm.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
-                else:
-                    spectraSky = None
-                    spectraFluxstd = None
-                    spectraScience = None
-            if spectraSky is not None:
-                data1 = []
-                data2 = []
-                for wav, flx, sky, msk in zip(spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
-                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
-                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
-                    # FIXME (SKYLINE should be masked)
-                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
-                    df = pd.DataFrame({'sky': sky[flg], 'flx': flx[flg]})
-                    # sky background level
-                    dat = df.sky
-                    data1.append(np.nanmedian(dat))
-                    # flux purturbation
-                    dat = df.flx
-                    dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
-                    data2.append(dat_clip.std(skipna=True))
-                logger.info(f"{len(data1)} SKYs are used to calculate")
-                data2f = []
-                for wav, flx, msk in zip(spectraFluxstd.wavelength, spectraFluxstd.flux, spectraFluxstd.mask):
-                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
-                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
-                    # FIXME (SKYLINE should be masked)
-                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
-                    data2f.append(np.nanstd(flx[flg]))
-                data2s = []
-                for wav, flx, msk in zip(spectraScience.wavelength, spectraScience.flux, spectraScience.mask):
-                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
-                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
-                    # FIXME (SKYLINE should be masked)
-                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk==0)
-                    data2s.append(np.nanstd(flx[flg]))
-                # store info into dataframe
-                data = {'pfs_visit_id': [v for _ in range(len(spectraSky))],
-                        'fiber_id': spectraSky.fiberId,
-                        'background_level': data1,
+                rawFile = None
+
+        # get moon condition
+        self.getMoonCondition(visit, rawFile, updateDB=updateDB)
+
+        # get AG background level
+        self.calcAgBackground(visit=visit)
+
+        # calculate the typical sky background level
+        logger.info(f"calculating sky background level for visit={visit}...")
+        if usePfsMerged is True:
+            logger.info(f"pfsMerged is used")
+            if pfsMerged is not None:
+                spectraSky = pfsMerged.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.SKY)
+                spectraFluxstd = pfsMerged.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                spectraScience = pfsMerged.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
+            else:
+                spectraSky = None
+                spectraFluxstd = None
+                spectraScience = None
+        else:
+            logger.info(f"pfsArm is used")
+            if pfsArm is not None:
+                spectraSky = pfsArm.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.SKY)
+                spectraFluxstd = pfsArm.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                spectraScience = pfsArm.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
+            else:
+                spectraSky = None
+                spectraFluxstd = None
+                spectraScience = None
+        if spectraSky is not None:
+
+            # background noise level measured from SKY fibers
+            data1 = []
+            data2 = []
+            for wav, flx, sky, msk in zip(spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
+                # FIXME (SKYLINE should be masked)
+                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                flx[bad] = np.nan
+                sky[bad] = np.nan
+
+                tmp1 = []
+                tmp2 = []
+                for arm in ["b", "r", "n", "m"]:
+                    wc = self.conf["qa"]["ref_wav"][f"ref_wav_{arm}"]
+                    dw = self.conf["qa"]["ref_wav"][f"ref_dwav_{arm}"]
+                    flg = (wav > wc - dw) * (wav < wc + dw)
+                    df = pd.DataFrame({'sky': sky[flg], 'res': flx[flg]})
+                    # median sky background level
+                    _,sky_med,_ = sigma_clipped_stats(df.sky, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                    tmp1.append(sky_med)
+                    # sky purturbation sigma
+                    if calcMode=='clipped':
+                        # sigma_clipped_sigma
+                        _,_,res_sgm_clipped = sigma_clipped_stats(df.res, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                        tmp2.append(res_sgm_clipped)
+                    elif calcMode=='iqr':
+                        # IQR sigma
+                        q25 = np.nanpercentile(df.res, 25, axis=0)
+                        q50 = np.nanpercentile(df.res, 25, axis=0)
+                        q75 = np.nanpercentile(df.res, 75, axis=0)
+                        res_sgm_iqr = 0.741 * (q75 - q25)
+                        tmp2.append(res_sgm_iqr)
+                data1.append(tmp1)
+                data2.append(tmp2)
+            logger.info(f"{len(data1)} SKYs are used to calculate background")
+
+            # background noise level measured from FLUXSTD fibers
+            data2f = []
+            for wav, flx, msk in zip(spectraFluxstd.wavelength, spectraFluxstd.flux, spectraFluxstd.mask):
+                wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
+                dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
+                # FIXME (SKYLINE should be masked)
+                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                flx[bad] = np.nan
+                flg = (wav > wc-dw) * (wav < wc+dw)
+                # purturbation sigma
+                if calcMode=='clipped':
+                    # sigma_clipped_sigma
+                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                    data2f.append(res_sgm_clipped)
+                elif calcMode=='iqr':
+                    # IQR sigma
+                    q25 = np.nanpercentile(flx[flg], 25, axis=0)
+                    q50 = np.nanpercentile(flx[flg], 25, axis=0)
+                    q75 = np.nanpercentile(flx[flg], 75, axis=0)
+                    res_sgm_iqr = 0.741 * (q75 - q25)
+                    data2f.append(res_sgm_iqr)
+
+            # background noise level measured from SCIENCE fibers
+            data2s = []
+            for wav, flx, msk in zip(spectraScience.wavelength, spectraScience.flux, spectraScience.mask):
+                wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
+                dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
+                # FIXME (SKYLINE should be masked)
+                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                flx[bad] = np.nan
+                flg = (wav > wc-dw) * (wav < wc+dw)
+                # purturbation sigma
+                if calcMode=='clipped':
+                    # sigma_clipped_sigma
+                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                    data2s.append(res_sgm_clipped)
+                elif calcMode=='iqr':
+                    # IQR sigma
+                    q25 = np.nanpercentile(flx[flg], 25, axis=0)
+                    q50 = np.nanpercentile(flx[flg], 25, axis=0)
+                    q75 = np.nanpercentile(flx[flg], 75, axis=0)
+                    res_sgm_iqr = 0.741 * (q75 - q25)
+                    data2s.append(res_sgm_iqr)
+            data1 = np.array(data1).T
+            data2 = np.array(data2).T
+            # store info into dataframe
+            
+            # calculate background level (mean over fibers) per visit
+            sky_mean = []
+            # calculate background level (median over fibers) per visit
+            sky_median = []
+            # calculate background level (stddev over fibers) per visit
+            sky_stddev = []
+            # calculate noise level (mean over fibers) per visit
+            noise_mean = []
+            # calculate noise level (median over fibers) per visit
+            noise_median = []
+            # calculate noise level (stddev over fibers) per visit
+            noise_stddev = []
+            for i,arm in enumerate(["b", "r", "n", "m"]):
+                data = {'fiber_id': spectraSky.fiberId,
+                        'background_level': data1[i],
                         }
                 df1 = pd.DataFrame(data)
+                #self.df_sky_background = df1.copy()                
                 if self.df_sky_background is None:
                     self.df_sky_background = df1.copy()
                 else:
-                    self.df_sky_background = pd.concat(
-                        [self.df_sky_background, df1.copy()], ignore_index=True)
+                    self.df_sky_background = pd.concat([self.df_sky_background, df1.copy()], ignore_index=True)
 
-                data = {'pfs_visit_id': [v for _ in range(len(spectraSky))],
-                        'fiber_id': spectraSky.fiberId,
-                        'noise_level': data2,
+                data = {'fiber_id': spectraSky.fiberId,
+                        'noise_level': data2[i],
                         }
                 df2 = pd.DataFrame(data)
-                data = {'pfs_visit_id': [v for _ in range(len(spectraFluxstd))],
-                        'fiber_id': spectraFluxstd.fiberId,
+                data = {'fiber_id': spectraFluxstd.fiberId,
                         'noise_level': data2f,
                         }
                 df2f = pd.DataFrame(data)
-                data = {'pfs_visit_id': [v for _ in range(len(spectraScience))],
-                        'fiber_id': spectraScience.fiberId,
+                data = {'fiber_id': spectraScience.fiberId,
                         'noise_level': data2s,
                         }
                 df2s = pd.DataFrame(data)
-                if self.df_sky_noise is None:
-                    self.df_sky_noise = df2.copy()
-                else:
-                    self.df_sky_noise = pd.concat(
-                        [self.df_sky_noise, df2.copy()], ignore_index=True)
-                visit_p_visit.append(v)
-                if self.df_flxstd_noise is None:
-                    self.df_flxstd_noise = df2f.copy()
-                else:
-                    self.df_flxstd_noise = pd.concat(
-                        [self.df_flxstd_noise, df2f.copy()], ignore_index=True)
-                if self.df_science_noise is None:
-                    self.df_science_noise = df2s.copy()
-                else:
-                    self.df_science_noise = pd.concat(
-                        [self.df_science_noise, df2s.copy()], ignore_index=True)
+                self.df_sky_noise = df2.copy()
+                #if self.df_sky_noise is None:
+                #    self.df_sky_noise = df2.copy()
+                #else:
+                #    self.df_sky_noise = pd.concat([self.df_sky_noise, df2.copy()], ignore_index=True)
+
+                self.df_flxstd_noise = df2f.copy()
+                #if self.df_flxstd_noise is None:
+                #    self.df_flxstd_noise = df2f.copy()
+                #else:
+                #    self.df_flxstd_noise = pd.concat([self.df_flxstd_noise, df2f.copy()], ignore_index=True)
+                self.df_science_noise = df2s.copy()
+                #if self.df_science_noise is None:
+                #    self.df_science_noise = df2s.copy()
+                #else:
+                #    self.df_science_noise = pd.concat([self.df_science_noise, df2s.copy()], ignore_index=True)
                 # sky = df1['background_level']
-                dat = df1.query(f'pfs_visit_id=={visit}').background_level
-                dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
-                sky_mean_p_visit.append(dat_clip.mean(skipna=True))
-                sky_median_p_visit.append(dat_clip.median(skipna=True))
-                sky_stddev_p_visit.append(dat_clip.std(skipna=True))
+                dat = df1.background_level
+                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
+                sky_mean.append(val_ave)
+                sky_median.append(val_med)
+                sky_stddev.append(val_std)
                 # noise = df2['noise_level']
-                dat = df2.query(f'pfs_visit_id=={visit}').noise_level
-                dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
-                noise_mean_p_visit.append(dat_clip.mean(skipna=True))
-                noise_median_p_visit.append(dat_clip.median(skipna=True))
-                noise_stddev_p_visit.append(dat_clip.std(skipna=True))
-            else:
-                logger.info(f'visit={v} skipped...')
+                dat = df2.noise_level
+                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
+                noise_mean.append(val_ave)
+                noise_median.append(val_med)
+                noise_stddev.append(val_std)
+        else:
+            logger.info(f'visit={v} skipped...')
 
         # populate database (sky table)
-        data = {'pfs_visit_id': visit_p_visit,
-                'sky_background_r_mean': sky_mean_p_visit,
-                'sky_background_r_median': sky_median_p_visit,
-                'sky_background_r_sigma': sky_stddev_p_visit,
-                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"] for _ in visit_p_visit],
-                'agc_background_mean': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_mean'].values,
-                'agc_background_median': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_median'].values,
-                'agc_background_sigma': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={v}")['ag_background_sigma'].values,
+
+        data = {'pfs_visit_id': [visit],
+                'sky_background_b_mean': [sky_mean[0]],
+                'sky_background_b_median': [sky_median[0]],
+                'sky_background_b_sigma': [sky_stddev[0]],
+                'wavelength_ref_b': [self.conf["qa"]["ref_wav"]["ref_wav_b"]],
+                'sky_background_r_mean': [sky_mean[1]],
+                'sky_background_r_median': [sky_median[1]],
+                'sky_background_r_sigma': [sky_stddev[1]],
+                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"]],
+                'sky_background_n_mean': [sky_mean[2]],
+                'sky_background_n_median': [sky_median[2]],
+                'sky_background_n_sigma': [sky_stddev[2]],
+                'wavelength_ref_n': [self.conf["qa"]["ref_wav"]["ref_wav_n"]],
+                'sky_background_m_mean': [sky_mean[3]],
+                'sky_background_m_median': [sky_median[3]],
+                'sky_background_m_sigma': [sky_stddev[3]],
+                'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
+                'agc_background_mean': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_mean'].values,
+                'agc_background_median': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_median'].values,
+                'agc_background_sigma': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_sigma'].values,
                 }
         df1 = pd.DataFrame(data)
         self.qadb.populateQATable('sky', df1, updateDB=updateDB)
@@ -864,11 +927,23 @@ class Condition(object):
                 [self.df_sky_background_stats_pv, df1.copy()], ignore_index=True)
 
         # populate database (noise table)
-        data = {'pfs_visit_id': visit_p_visit,
-                'noise_r_mean': noise_mean_p_visit,
-                'noise_r_median': noise_median_p_visit,
-                'noise_r_sigma': noise_stddev_p_visit,
-                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"] for _ in visit_p_visit],
+        data = {'pfs_visit_id': [visit],
+                'noise_b_mean': [noise_mean[0]],
+                'noise_b_median': [noise_median[0]],
+                'noise_b_sigma': [noise_stddev[0]],
+                'wavelength_ref_b': [self.conf["qa"]["ref_wav"]["ref_wav_b"]],
+                'noise_r_mean': [noise_mean[1]],
+                'noise_r_median': [noise_median[1]],
+                'noise_r_sigma': [noise_stddev[1]],
+                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"]],
+                'noise_n_mean': [noise_mean[2]],
+                'noise_n_median': [noise_median[2]],
+                'noise_n_sigma': [noise_stddev[2]],
+                'wavelength_ref_n': [self.conf["qa"]["ref_wav"]["ref_wav_n"]],
+                'noise_m_mean': [noise_mean[3]],
+                'noise_m_median': [noise_median[3]],
+                'noise_m_sigma': [noise_stddev[3]],
+                'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
                 }
         df2 = pd.DataFrame(data)
         self.qadb.populateQATable('noise', df2, updateDB=updateDB)
@@ -935,154 +1010,177 @@ class Condition(object):
         else:
             pfs_design_id = None
 
-        visit_p_visit = []
-        # calculate throughput (mean over fibers) per visit
-        throughput_mean_p_visit = []
-        # calculate throughput (median over fibers) per visit
-        throughput_median_p_visit = []
-        # calculate throughput (stddev over fibers) per visit
-        throughput_stddev_p_visit = []
-        for v in np.unique(pfs_visit_id):
-            if butler is not None and useButler is True:
-                dataId = dict(visit=v, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
-                              )
-                pfsArm = butler.get("pfsArm", dataId)
-                pfsMerged = butler.get("pfsMerged", dataId)
-                pfsConfig = butler.get("pfsConfig", dataId)
-                if usePfsFluxReference is True:
-                    pfsFluxReference = butler.get("pfsFluxReference", dataId)
-                else:
-                    pfsFluxReference = None
+        # check whether butler is available or not
+        if butler is not None and useButler is True:
+            dataId = dict(visit=visit, spectrograph=self.skyQaConf["ref_spectrograph_sky"], arm=self.skyQaConf["ref_arm_sky"],
+                            )
+            pfsArm = butler.get("pfsArm", dataId)
+            pfsMerged = butler.get("pfsMerged", dataId)
+            pfsConfig = butler.get("pfsConfig", dataId)
+            if usePfsFluxReference is True:
+                pfsFluxReference = butler.get("pfsFluxReference", dataId)
             else:
-                _pfsArmDataDir = os.path.join(
-                    rerun, 'pfsArm', obsdate, 'v%06d' % (v))
-                _pfsMergedDataDir = os.path.join(
-                    rerun, 'pfsMerged', obsdate, 'v%06d' % (v))
+                pfsFluxReference = None
+        else:
+            _pfsArmDataDir = os.path.join(
+                rerun, 'pfsArm', obsdate, 'v%06d' % (visit))
+            _pfsMergedDataDir = os.path.join(
+                rerun, 'pfsMerged', obsdate, 'v%06d' % (visit))
+            _pfsFluxReferenceDataDir = os.path.join(
+                rerun, 'pfsFluxReference', obsdate, 'v%06d' % (visit))
+            _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
+            if os.path.isdir(_pfsArmDataDir) is False:
+                _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
+            if os.path.isdir(_pfsMergedDataDir) is False:
+                _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
+            if os.path.isdir(_pfsFluxReferenceDataDir) is False:
                 _pfsFluxReferenceDataDir = os.path.join(
-                    rerun, 'pfsFluxReference', obsdate, 'v%06d' % (v))
-                _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
-                if os.path.isdir(_pfsArmDataDir) is False:
-                    _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
-                if os.path.isdir(_pfsMergedDataDir) is False:
-                    _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
-                if os.path.isdir(_pfsFluxReferenceDataDir) is False:
-                    _pfsFluxReferenceDataDir = os.path.join(
-                        rerun, 'pfsFluxReference')
-                if os.path.isdir(_pfsConfigDataDir) is False:
-                    _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
-                _identity = Identity(visit=v,
-                                     arm=self.skyQaConf["ref_arm_sky"],
-                                     spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                     )
-                try:
-                    _pfsDesignId = pfs_design_id
-                    pfsMerged = PfsMerged.read(
-                        _identity, dirName=_pfsMergedDataDir)
-                    pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=v,
-                                               dirName=_pfsConfigDataDir)
-                    if usePfsFluxReference is True:
-                        pfsFluxReference = PfsFluxReference.read(
-                            _identity, dirName=_pfsFluxReferenceDataDir)
-                    else:
-                        pfsFluxReference = None
-                except:
-                    pfsMerged = None
-                    _pfsDesignId = None
-                    pfsConfig = None
+                    rerun, 'pfsFluxReference')
+            if os.path.isdir(_pfsConfigDataDir) is False:
+                _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
+            _identity = Identity(visit=visit,
+                                    arm=self.skyQaConf["ref_arm_sky"],
+                                    spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                    )
+            try:
+                _pfsDesignId = pfs_design_id
+                pfsMerged = PfsMerged.read(
+                    _identity, dirName=_pfsMergedDataDir)
+                pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=visit,
+                                            dirName=_pfsConfigDataDir)
+                if usePfsFluxReference is True:
+                    pfsFluxReference = PfsFluxReference.read(
+                        _identity, dirName=_pfsFluxReferenceDataDir)
+                else:
                     pfsFluxReference = None
+            except:
+                pfsMerged = None
+                _pfsDesignId = None
+                pfsConfig = None
+                pfsFluxReference = None
+            try:
                 try:
-                    try:
-                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
-                    except:
-                        _identity = Identity(visit=v,
-                                             arm="m",
-                                             spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                             )
-                        pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
                 except:
-                    pfsArm = None
-            # calculate the throughput from FLUXSTD spectra
-            logger.info(f"calculating throughput for visit={v}...")
+                    _identity = Identity(visit=v,
+                                            arm="m",
+                                            spectrograph=self.skyQaConf["ref_spectrograph_sky"]
+                                            )
+                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+            except:
+                pfsArm = None
 
-            ref_wav = self.conf["qa"]["ref_wav"]["ref_wav_r"]
-            if ref_wav < 550.:
-                idx_psfFlux = 0
-            elif ref_wav < 700.:
-                idx_psfFlux = 1
-            elif ref_wav < 800.:
-                idx_psfFlux = 2
-            elif ref_wav < 900.:
-                idx_psfFlux = 3
+        # calculate the throughput from FLUXSTD spectra
+        logger.info(f"calculating throughput for visit={visit}...")
+
+        ref_wav = self.conf["qa"]["ref_wav"]["ref_wav_r"]
+        if ref_wav < 550.:
+            idx_psfFlux = 0
+        elif ref_wav < 700.:
+            idx_psfFlux = 1
+        elif ref_wav < 800.:
+            idx_psfFlux = 2
+        elif ref_wav < 900.:
+            idx_psfFlux = 3
+        else:
+            idx_psfFlux = 4
+
+        if usePfsMerged is True:
+            logger.info(f"pfsMerged is used")
+            if pfsMerged is not None:
+                SpectraFluxstd = pfsMerged.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
             else:
-                idx_psfFlux = 4
-
-            if usePfsMerged is True:
-                logger.info(f"pfsMerged is used")
-                if pfsMerged is not None:
-                    SpectraFluxstd = pfsMerged.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
-                else:
-                    SpectraFluxstd = None
+                SpectraFluxstd = None
+        else:
+            logger.info(f"pfsArm is used")
+            if pfsArm is not None:
+                SpectraFluxstd = pfsArm.select(
+                    pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
             else:
-                logger.info(f"pfsArm is used")
-                if pfsArm is not None:
-                    SpectraFluxstd = pfsArm.select(
-                        pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
-                else:
-                    SpectraFluxstd = None
+                SpectraFluxstd = None
 
-            if SpectraFluxstd is not None:
-                throughput = []
-                for fid, wav, flx, msk in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux, SpectraFluxstd.mask):
-                    wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
-                    dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
+        if SpectraFluxstd is not None:
+            throughput = []
+            for fid, wav, flx, msk in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux, SpectraFluxstd.mask):
+                bad = msk & SpectraFluxstd.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                flx[bad] = np.nan
+                tmp = []
+                for arm in ["b", "r", "n", "m"]:
+                    wc = self.conf["qa"]["ref_wav"][f"ref_wav_{arm}"]
+                    dw = self.conf["qa"]["ref_wav"][f"ref_dwav_{arm}"]
                     if usePfsFluxReference is True:
-                        wav_pfr = np.array(
-                            pfsFluxReference.wavelength.tolist())
+                        wav_pfr = np.array(pfsFluxReference.wavelength.tolist())
                         flx_pfr = pfsFluxReference.flux[pfsFluxReference.fiberId == fid][0]
                         flg = (wav_pfr > wc - dw) * (wav_pfr < wc + dw) # FIXME?
-                        refFlux = np.nanmedian(flx_pfr[flg])
-                        logger.info(f'pfsFluxReference is used...')
+                        _,refFlux,_ = sigma_clipped_stats(flx_pfr[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=3.0)
+                        #logger.info(f'pfsFluxReference is used...')
                     else:
                         refFlux = pfsConfig[pfsConfig.fiberId == fid].psfFlux[0][idx_psfFlux]
-                        logger.info(f'psfFlux is used...')
-
+                        #logger.info(f'psfFlux is used...')
                     # FIXME (SKYLINE should be masked)
-                    flg = (wav > wc-dw) * (wav < wc+dw) * (msk == 0)
-                    throughput.append(np.nanmedian(flx[flg]) / refFlux)
-                logger.info(
-                    f"{len(throughput)} FLUXSTDs are used to calculate")
-                visit_p_visit.append(v)
+                    flg = (wav > wc - dw) * (wav < wc + dw)
+                    _,meaFlux,_ = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
+                    tmp.append(meaFlux / refFlux)
+                throughput.append(tmp)
+            logger.info(
+                f"{len(throughput)} FLUXSTDs are used to calculate")
+            throughput = np.array(throughput).T
 
-                if len(throughput) > 0:
-                    throughput_mean_p_visit.append(np.nanmean(throughput))
-                    throughput_median_p_visit.append(np.nanmedian(throughput))
-                    throughput_stddev_p_visit.append(np.nanstd(throughput))
-                else:
-                    throughput_mean_p_visit.append(-1)
-                    throughput_median_p_visit.append(-1)
-                    throughput_stddev_p_visit.append(-1)
-                # store info into dataframe
-                data = {'pfs_visit_id': [v for _ in range(len(SpectraFluxstd))],
-                        'fiber_id': SpectraFluxstd.fiberId,
-                        'throughput': throughput,
+            # calculate background level (mean over fibers) per visit
+            throughput_mean = []
+            # calculate background level (median over fibers) per visit
+            throughput_median = []
+            # calculate background level (stddev over fibers) per visit
+            throughput_stddev = []
+
+            for i,arm in enumerate(["b", "r", "n", "m"]):
+                data = {'fiber_id': SpectraFluxstd.fiberId,
+                        'throughput': throughput[i],
                         }
-                df = pd.DataFrame(
-                )
-                if self.df_throughput is None:
-                    self.df_throughput = df.copy()
+                df1 = pd.DataFrame(data)
+                if len(df1) > 0:
+                    val_ave, val_med, val_std = sigma_clipped_stats(df1.throughput, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
+                    throughput_mean.append(val_ave)
+                    throughput_median.append(val_med)
+                    throughput_stddev.append(val_std)
                 else:
-                    self.df_throughput = pd.concat(
-                        [self.df_throughput, df], ignore_index=True)
+                    throughput_mean.append(-1)
+                    throughput_median.append(-1)
+                    throughput_stddev.append(-1)
+            # store info into dataframe
+            data = {'pfs_visit_id': [visit for _ in range(len(SpectraFluxstd))],
+                    'fiber_id': SpectraFluxstd.fiberId,
+                    'throughput': throughput,
+                    }
+            df = pd.DataFrame(
+            )
+            if self.df_throughput is None:
+                self.df_throughput = df.copy()
             else:
-                logger.info(f'visit={v} skipped...')
+                self.df_throughput = pd.concat(
+                    [self.df_throughput, df], ignore_index=True)
+        else:
+            logger.info(f'visit={visit} skipped...')
 
         # populate database (throughput table)
-        data = {'pfs_visit_id': visit_p_visit,
-                'throughput_r_mean': throughput_mean_p_visit,
-                'throughput_r_median': throughput_median_p_visit,
-                'throughput_r_sigma': throughput_stddev_p_visit,
-                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"] for _ in visit_p_visit],
+        data = {'pfs_visit_id': [visit],
+                'throughput_b_mean': [throughput_mean[0]],
+                'throughput_b_median': [throughput_median[0]],
+                'throughput_b_sigma': [throughput_stddev[0]],
+                'wavelength_ref_b': [self.conf["qa"]["ref_wav"]["ref_wav_b"]],
+                'throughput_r_mean': [throughput_mean[1]],
+                'throughput_r_median': [throughput_median[1]],
+                'throughput_r_sigma': [throughput_stddev[1]],
+                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"]],
+                'throughput_n_mean': [throughput_mean[2]],
+                'throughput_n_median': [throughput_median[2]],
+                'throughput_n_sigma': [throughput_stddev[2]],
+                'wavelength_ref_n': [self.conf["qa"]["ref_wav"]["ref_wav_n"]],
+                'throughput_m_mean': [throughput_mean[3]],
+                'throughput_m_median': [throughput_median[3]],
+                'throughput_m_sigma': [throughput_stddev[3]],
+                'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
                 }
         df = pd.DataFrame(data)
         self.qadb.populateQATable('throughput', df, updateDB=updateDB)
@@ -1582,9 +1680,11 @@ class Condition(object):
                 # get background level
                 if skipCalcSkyBackground == False:
                     self.calcSkyBackground(visit=visit, useButler=useButler, usePfsMerged=usePfsMerged, updateDB=updateDB)
+                    logger.info('calculation of sky background level is done!')
                 # get throughput
                 if skipCalcThroughput == False:
                     self.calcThroughput(visit=visit, useButler=useButler, usePfsMerged=usePfsMerged, updateDB=updateDB)
+                    logger.info('calculation of throughput is done!')
                 # append visit
                 self.visitList.append(visit)
             else:
