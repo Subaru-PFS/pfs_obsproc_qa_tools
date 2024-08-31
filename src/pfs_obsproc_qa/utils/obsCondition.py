@@ -908,7 +908,7 @@ class Condition(object):
                 noise_median.append(val_med)
                 noise_stddev.append(val_std)
         else:
-            logger.info(f'visit={v} skipped...')
+            logger.info(f'visit={visit} skipped...')
 
         # populate database (sky table)
 
@@ -1320,7 +1320,7 @@ class Condition(object):
                     for v in self.visitList:
                         msk = self.df_seeing['pfs_visit_id'] == v
                         axe.scatter(x_data[msk], fwhm[msk], marker='o', s=10,
-                                    alpha=0.5, rasterized=True, label=f'visit={v}')
+                                    alpha=0.5, rasterized=True, label=f'visit={visit}')
                 else:
                     axe.scatter(x_data, fwhm, marker='o', s=10, edgecolor='none',
                                 facecolor='C0', alpha=0.5, rasterized=True, label=f'all')
@@ -1374,7 +1374,7 @@ class Condition(object):
                     for v in self.visitList:
                         msk = self.df_transparency['pfs_visit_id'] == v
                         axe.scatter(x_data[msk], transp[msk], marker='o', s=10,
-                                    alpha=0.5, rasterized=True, label=f'visit={v}')
+                                    alpha=0.5, rasterized=True, label=f'visit={visit}')
                 else:
                     axe.scatter(x_data, transp, marker='o', s=10, edgecolor='none',
                                 facecolor='C0', alpha=0.5, rasterized=True, label='all')
@@ -1429,7 +1429,7 @@ class Condition(object):
                     for v in self.visitList:
                         msk = self.df_ag_background['pfs_visit_id'] == v
                         axe.scatter(x_data[msk], ag_background[msk], marker='o',
-                                    s=10, alpha=0.5, rasterized=True, label=f'visit={v}')
+                                    s=10, alpha=0.5, rasterized=True, label=f'visit={visit}')
                 else:
                     axe.scatter(x_data, ag_background, marker='o', s=10, edgecolor='none',
                                 facecolor='C0', alpha=0.5, rasterized=True, label='all')
