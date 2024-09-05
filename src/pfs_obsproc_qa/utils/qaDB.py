@@ -25,7 +25,7 @@ class QaDB(object):
 
     def __init__(self, conf):
         self.conf = conf
-        self._engine = create_engine(get_url(self.conf))
+        self._engine = create_engine(get_url(self.conf), future=True)
         self._conn = self._engine.raw_connection()
 
     def query(self, sqlCmd):
@@ -60,8 +60,12 @@ class QaDB(object):
             except:
                 df_new = df_new
             try:
-                df_new.to_sql(tableName, self._engine,
-                              if_exists='append', index=False)
+                if updateDB == True:
+                    df_new.to_sql(tableName, self._engine,
+                                  if_exists='append', index=False)
+                else:
+                    logger.info('No update...')
+                    pass
             except exc.IntegrityError:
                 if updateDB == True:
                     if 'pfs_visit_id' in data.keys():
@@ -116,8 +120,13 @@ class QaDB(object):
             except:
                 df_new = df_new
             try:
-                df_new.to_sql(tableName, self._engine,
-                              if_exists='append', index=False)
+                if updateDB == True:
+                    df_new.to_sql(tableName, self._engine,
+                                if_exists='append', index=False)
+                else:
+                    logger.info('No update...')
+                    pass
+
             except exc.IntegrityError:
                 if updateDB == True:
                     if 'pfs_visit_id' in data.keys() and 'agc_exposure_id' in data.keys():
