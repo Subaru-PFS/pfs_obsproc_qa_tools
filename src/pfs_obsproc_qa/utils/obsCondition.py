@@ -84,6 +84,12 @@ class Condition(object):
         logzero.logfile(self.conf['logger']['logfile'],
                         disableStderrLogger=True)
 
+    def getPfsDesign(self, visit):
+        sqlWhere = f'pfs_visit.pfs_visit_id={visit}'
+        sqlCmd = f'SELECT * FROM pfs_visit JOIN pfs_design ON pfs_visit.pfs_design_id=pfs_design.pfs_design_id WHERE {sqlWhere} ORDER BY pfs_visit.pfs_visit_id;'
+        df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
+        self.df_design = df.copy()
+
     def getAgcData(self, visit):
         """ Get AGC data information
 
@@ -143,7 +149,7 @@ class Condition(object):
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
         return df
 
-    def getGuideError(self, visit):
+    def getGuideError(self, visit, updateDB=True):
         """ Get GuideError information
 
         Parameters
@@ -165,6 +171,23 @@ class Condition(object):
         else:
             self.df_guide_error = pd.concat(
                 [self.df_guide_error, df], ignore_index=True)
+
+        ## calculate statistics ##
+
+        offset_mean = np.nanmean(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
+        offset_median = np.nanmedian(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
+        offset_sigma = np.nanstd(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
+
+        data = {'pfs_visit_id': [visit],
+                'number_guide_stars': [self.df_design.num_guide_stars[0]],
+                'offset_mean': [offset_mean],
+                'offset_median': [offset_median],
+                'offset_sigma': [offset_sigma],
+                }
+        df = pd.DataFrame(data)
+
+        ## populate qaDB ##
+        self.qadb.populateQATable('guide_offset', df, updateDB=updateDB)
 
     def calcSeeing(self, visit, correct=True, corrColor=True, updateDB=True):
         """Calculate Seeing size based on AGC measurements
@@ -1618,6 +1641,8 @@ class Condition(object):
         for visit in visits:
             print(f'visit={visit}')
             if visit not in self.visitList:
+                # get design
+                self.getPfsDesign(visit=visit)
                 # get seeing
                 self.calcSeeing(visit=visit, corrColor=corrColor, updateDB=updateDB)
                 # get transparency
@@ -1625,7 +1650,7 @@ class Condition(object):
                 # get transparency
                 self.calcAgBackground(visit=visit)
                 # getGuideOffset
-                self.getGuideError(visit=visit)
+                self.getGuideError(visit=visit, updateDB=updateDB)
                 # append visit
                 self.visitList.append(visit)
             else:
