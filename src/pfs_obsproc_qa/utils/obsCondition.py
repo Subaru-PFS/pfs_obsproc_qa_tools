@@ -781,37 +781,48 @@ class Condition(object):
                 fiberStatusFluxstd = None
                 fiberStatusScience = None
         if spectraSky is not None:
+
+            fiberIds_used = []
+            for sp in self.conf["qa"]["sky"]["ref_spectrograph_sky"]:
+                fiberIds_used += list(pfsConfig[pfsConfig.spectrograph==sp].fiberId)
+
             # background noise level measured from SKY fibers
             data1 = []
             data2 = []
-            for wav, flx, sky, msk in zip(spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
-                # FIXME (SKYLINE should be masked)
-                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
-                flx[bad] = np.nan
-                sky[bad] = np.nan
-
-                tmp1 = []
-                tmp2 = []
-                for arm in ["b", "r", "n", "m"]:
-                    wc = self.conf["qa"]["ref_wav"][f"ref_wav_{arm}"]
-                    dw = self.conf["qa"]["ref_wav"][f"ref_dwav_{arm}"]
-                    flg = (wav > wc - dw) * (wav < wc + dw)
-                    df = pd.DataFrame({'sky': sky[flg], 'res': flx[flg]})
-                    # median sky background level
-                    _,sky_med,_ = sigma_clipped_stats(df.sky, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
-                    tmp1.append(sky_med)
-                    # sky purturbation sigma
-                    if calcMode=='clipped':
-                        # sigma_clipped_sigma
-                        _,_,res_sgm_clipped = sigma_clipped_stats(df.res, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
-                        tmp2.append(res_sgm_clipped)
-                    elif calcMode=='iqr':
-                        # IQR sigma
-                        q25 = np.nanpercentile(df.res, 25, axis=0)
-                        q50 = np.nanpercentile(df.res, 25, axis=0)
-                        q75 = np.nanpercentile(df.res, 75, axis=0)
-                        res_sgm_iqr = 0.741 * (q75 - q25)
-                        tmp2.append(res_sgm_iqr)
+            for fid, wav, flx, sky, msk in zip(spectraSky.fiberId, spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
+                if fid in fiberIds_used:
+                    # FIXME (SKYLINE should be masked)
+                    bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                    flx[bad] = np.nan
+                    sky[bad] = np.nan
+                    tmp1 = []
+                    tmp2 = []
+                    for arm in ["b", "r", "n", "m"]:
+                        wc = self.conf["qa"]["ref_wav"][f"ref_wav_{arm}"]
+                        dw = self.conf["qa"]["ref_wav"][f"ref_dwav_{arm}"]
+                        flg = (wav > wc - dw) * (wav < wc + dw)
+                        df = pd.DataFrame({'sky': sky[flg], 'res': flx[flg]})
+                        # median sky background level
+                        _,sky_med,_ = sigma_clipped_stats(df.sky, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                        tmp1.append(sky_med)
+                        # sky purturbation sigma
+                        if calcMode=='clipped':
+                            # sigma_clipped_sigma
+                            _,_,res_sgm_clipped = sigma_clipped_stats(df.res, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                            tmp2.append(res_sgm_clipped)
+                        elif calcMode=='iqr':
+                            # IQR sigma
+                            q25 = np.nanpercentile(df.res, 25, axis=0)
+                            q50 = np.nanpercentile(df.res, 25, axis=0)
+                            q75 = np.nanpercentile(df.res, 75, axis=0)
+                            res_sgm_iqr = 0.741 * (q75 - q25)
+                            tmp2.append(res_sgm_iqr)
+                else:
+                    tmp1 = []
+                    tmp2 = []
+                    for arm in ["b", "r", "n", "m"]:
+                        tmp1.append(np.nan)
+                        tmp2.append(np.nan)
                 data1.append(tmp1)
                 data2.append(tmp2)
             logger.info(f"{len(data1)} SKYs are used to calculate background")
@@ -862,7 +873,7 @@ class Condition(object):
             data1 = np.array(data1).T
             data2 = np.array(data2).T
             # store info into dataframe
-            
+
             # calculate background level (mean over fibers) per visit
             sky_mean = []
             # calculate background level (median over fibers) per visit
@@ -1184,9 +1195,18 @@ class Condition(object):
                 df1 = pd.DataFrame(data)
                 if len(df1) > 0:
                     val_ave, val_med, val_std = sigma_clipped_stats(df1.throughput, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
-                    throughput_mean.append(val_ave)
-                    throughput_median.append(val_med)
-                    throughput_stddev.append(val_std)
+                    if ~np.isnan(val_ave):
+                        throughput_mean.append(val_ave)
+                    else:
+                        throughput_mean.append(-1)
+                    if ~np.isnan(val_med):
+                        throughput_median.append(val_med)
+                    else:
+                        throughput_median.append(-1)
+                    if ~np.isnan(val_std):
+                        throughput_stddev.append(val_std)
+                    else:
+                        throughput_stddev.append(-1)
                 else:
                     throughput_mean.append(-1)
                     throughput_median.append(-1)
@@ -1206,7 +1226,10 @@ class Condition(object):
                     [self.df_throughput, df], ignore_index=True)
         else:
             logger.info(f'visit={visit} skipped...')
-
+            throughput_mean = [-1, -1, -1, -1]
+            throughput_median = [-1, -1, -1, -1]
+            throughput_stddev = [-1, -1, -1, -1]
+                
         # populate database (throughput table)
         data = {'pfs_visit_id': [visit],
                 'throughput_b_mean': [throughput_mean[0]],
@@ -1233,6 +1256,7 @@ class Condition(object):
         else:
             self.df_throughput_stats_pv = pd.concat(
                 [self.df_throughput_stats_pv, df], ignore_index=True)
+
 
     def getMoonCondition(self, visit, rawFile, updateDB=True):
         """
