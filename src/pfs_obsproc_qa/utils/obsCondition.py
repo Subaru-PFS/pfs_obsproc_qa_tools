@@ -16,6 +16,7 @@ from logzero import logger
 from astropy.io import fits
 from astropy.stats import sigma_clip, sigma_clipped_stats
 import glob
+import shutil
 
 __all__ = ["Condition"]
 
@@ -654,12 +655,12 @@ class Condition(object):
         _drpDataConf = self.conf["drp"]["data"]
         baseDir = _drpDataConf["base"]
         pfsConfigDir = _drpDataConf["pfsConfigDir"]
-        rerun = os.path.join(baseDir, 'rerun', _drpDataConf["rerun"])
-        calibRoot = os.path.join(baseDir, _drpDataConf["calib"])
+        output = os.path.join(baseDir, _drpDataConf["output"])
+        #calibRoot = os.path.join(baseDir, _drpDataConf["calib"])
         if useButler is True:
             try:
-                import lsst.daf.persistence as dafPersist
-                butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
+                from lsst.daf.butler import Butler
+                butler = Butler(baseDir, collections=output)
             except:
                 butler = None
         else:
@@ -673,7 +674,7 @@ class Condition(object):
         obstime = self.df['time_exp_end'][0]
         obstime = obstime.tz_localize('US/Hawaii')
         obstime = obstime.tz_convert('UTC')
-        obsdate = obstime.date().strftime('%Y-%m-%d')
+        obsdate = obstime.date().strftime('%Y%m%d')
         _df = self.getPfsVisit(visit=visit)
         if len(_df) > 0:
             pfs_design_id = _df.pfs_design_id[0]
@@ -688,47 +689,46 @@ class Condition(object):
             pfsMerged = butler.get("pfsMerged", dataId)
             pfsConfig = butler.get("pfsConfig", dataId)
         else:
-            _rawDataDir = os.path.join(baseDir, obsdate)
+            _rawDataDir = os.path.join(baseDir, "PFS/raw/all/raw")
+            dirs = glob.glob(os.path.join(output, "%06d/*" % (visit)))
+            dirs.sort(reverse=True)
+            run = os.path.basename(dirs[0]) if dirs else None
             _pfsArmDataDir = os.path.join(
-                rerun, 'pfsArm', obsdate, 'v%06d' % (visit))
-            _pfsMergedDataDir = os.path.join( 
-                rerun, 'pfsMerged', obsdate, 'v%06d' % (visit))
-            _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
-            if os.path.isdir(_pfsArmDataDir) is False:
-                _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
-            if os.path.isdir(_pfsMergedDataDir) is False:
-                _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
-            if os.path.isdir(_pfsConfigDataDir) is False:
-                _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
-            _identity = Identity(visit=visit,
-                                    arm=self.skyQaConf["ref_arm_sky"],
-                                    spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                    )
+                output, "%06d" % (visit), run, "pfsArm")
+            _pfsMergedDataDir = os.path.join(
+                output, "%06d" % (visit), run, "pfsMerged", obsdate, "%06d" % (visit))
+            _pfsConfigDataDir = os.path.join(baseDir, "PFS/pfsConfig/pfsConfig", obsdate, "%06d" % (visit))
             try:
                 _pfsDesignId = pfs_design_id
                 _identity = Identity(visit=visit)
-                pfsMerged = PfsMerged.read(
-                    _identity, dirName=_pfsMergedDataDir)
+                pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                pfsMerged = PfsMerged.readFits(os.path.join(_pfsMergedDataDir, pfsMergedFilename))
+                pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_pfsConfig.fits"
+                pfsConfigFilename2 = f"pfsConfig-0x{_pfsDesignId:016x}-{visit:06d}.fits"
+                shutil.copy2(os.path.join(_pfsConfigDataDir, pfsConfigFilename1), pfsConfigFilename2)
                 pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=visit,
-                                            dirName=_pfsConfigDataDir)
+                                            dirName=".")
+                os.remove(pfsConfigFilename2)
             except:
                 pfsMerged = None
                 _pfsDesignId = None
                 pfsConfig = None
             try:
+                spectrograph = self.skyQaConf["ref_spectrograph_sky"]
+                if type(spectrograph) == list:
+                    spectrograph = spectrograph[0]
+                arm = self.skyQaConf["ref_arm_sky"]
                 try:
-                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    pfsArmFilename = f"pfsArm_PFS_{visit:06d}_{arm}{spectrograph}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                    pfsArm = PfsArm.readFits(os.path.join(_pfsArmDataDir, pfsArmFilename))
                 except:
-                    _identity = Identity(visit=visit,
-                                         arm="m",
-                                         spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                         )
-                    pfsArm = PfsArm.read(_identity, dirName=_pfsArmDataDir)
+                    pfsArmFilename = f"pfsArm_PFS_{visit:06d}_m{spectrograph}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                    pfsArm = PfsArm.readFits(os.path.join(_pfsArmDataDir, pfsArmFilename))
             except:
                 pfsArm = None
             # get raw data
             rawFiles = glob.glob(os.path.join(
-                _rawDataDir, f'PFSA{visit:06d}??.fits'))
+                _rawDataDir, f'raw_PFS_{visit:06d}_??_PFS_raw_all.fits'))
             if len(rawFiles) > 0:
                 rawFile = rawFiles[0]
             else:
@@ -1033,12 +1033,12 @@ class Condition(object):
         _drpDataConf = self.conf["drp"]["data"]
         baseDir = _drpDataConf["base"]
         pfsConfigDir = _drpDataConf["pfsConfigDir"]
-        rerun = os.path.join(baseDir, 'rerun', _drpDataConf["rerun"])
-        calibRoot = os.path.join(baseDir, _drpDataConf["calib"])
+        output = os.path.join(baseDir, _drpDataConf["output"])
+        #calibRoot = os.path.join(baseDir, _drpDataConf["calib"])
         if useButler is True:
             try:
-                import lsst.daf.persistence as dafPersist
-                butler = dafPersist.Butler(rerun, calibRoot=calibRoot)
+                from lsst.daf.butler import Butler
+                butler = Butler(baseDir, collections=output)
             except:
                 butler = None
         else:
@@ -1052,7 +1052,7 @@ class Condition(object):
         obstime = self.df['time_exp_end'][0]
         obstime = obstime.tz_localize('US/Hawaii')
         obstime = obstime.tz_convert('UTC')
-        obsdate = obstime.date().strftime('%Y-%m-%d')
+        obsdate = obstime.date().strftime('%Y%m%d')
         _df = self.getPfsVisit(visit=visit)
         if len(_df) > 0:
             pfs_design_id = _df.pfs_design_id[0]
@@ -1071,35 +1071,30 @@ class Condition(object):
             else:
                 pfsFluxReference = None
         else:
+            _rawDataDir = os.path.join(baseDir, "PFS/raw/all/raw")
+            dirs = glob.glob(os.path.join(output, "%06d/*" % (visit)))
+            dirs.sort(reverse=True)
+            run = os.path.basename(dirs[0]) if dirs else None
             _pfsArmDataDir = os.path.join(
-                rerun, 'pfsArm', obsdate, 'v%06d' % (visit))
+                output, "%06d" % (visit), run, "pfsArm")
             _pfsMergedDataDir = os.path.join(
-                rerun, 'pfsMerged', obsdate, 'v%06d' % (visit))
+                output, "%06d" % (visit), run, "pfsMerged", obsdate, "%06d" % (visit))
+            _pfsConfigDataDir = os.path.join(baseDir, "PFS/pfsConfig/pfsConfig", obsdate, "%06d" % (visit))
             _pfsFluxReferenceDataDir = os.path.join(
-                rerun, 'pfsFluxReference', obsdate, 'v%06d' % (visit))
-            _pfsConfigDataDir = os.path.join(pfsConfigDir, obsdate)
-            if os.path.isdir(_pfsArmDataDir) is False:
-                _pfsArmDataDir = os.path.join(rerun, 'pfsArm')
-            if os.path.isdir(_pfsMergedDataDir) is False:
-                _pfsMergedDataDir = os.path.join(rerun, 'pfsMerged')
-            if os.path.isdir(_pfsFluxReferenceDataDir) is False:
-                _pfsFluxReferenceDataDir = os.path.join(
-                    rerun, 'pfsFluxReference')
-            if os.path.isdir(_pfsConfigDataDir) is False:
-                _pfsConfigDataDir = os.path.join(rerun, 'pfsConfig')
-            _identity = Identity(visit=visit,
-                                    arm=self.skyQaConf["ref_arm_sky"],
-                                    spectrograph=self.skyQaConf["ref_spectrograph_sky"]
-                                    )
+                output, "%06d" % (visit), run, "pfsFluxReference", obsdate, "%06d" % (visit))
             try:
                 _pfsDesignId = pfs_design_id
-                pfsMerged = PfsMerged.read(
-                    _identity, dirName=_pfsMergedDataDir)
+                pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                pfsMerged = PfsMerged.readFits(os.path.join(_pfsMergedDataDir, pfsMergedFilename))
+                pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_pfsConfig.fits"
+                pfsConfigFilename2 = f"pfsConfig-0x{_pfsDesignId:016x}-{visit:06d}.fits"
+                shutil.copy2(os.path.join(_pfsConfigDataDir, pfsConfigFilename1), pfsConfigFilename2)
                 pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=visit,
-                                            dirName=_pfsConfigDataDir)
+                                            dirName=".")
+                os.remove(pfsConfigFilename2)
                 if usePfsFluxReference is True:
-                    pfsFluxReference = PfsFluxReference.read(
-                        _identity, dirName=_pfsFluxReferenceDataDir)
+                    pfsFluxReferenceFilename = f"pfsFluxReference_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                    pfsFluxReference = PfsFluxReference.readFits(os.path.join(_pfsFluxReferenceDataDir, pfsFluxReferenceFilename))
                 else:
                     pfsFluxReference = None
             except:
