@@ -30,6 +30,7 @@ class QaDB(object):
 
     def query(self, sqlCmd):
         df = pd.read_sql(sql=sqlCmd, con=self._conn)
+        df = df.fillna(np.nan)
         return df
 
     def populateQATable(self, tableName, df, updateDB=True):

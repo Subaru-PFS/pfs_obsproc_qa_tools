@@ -667,9 +667,14 @@ class Condition(object):
             butler = None
 
         # get visit information
-        self.df = self.getSpsExposure(visit=visit)
+        self.df = self.getSpsExposure(visit=visit)       
         pfs_visit_id = self.df['pfs_visit_id'].astype(int)
         sps_camera_ids = self.df['sps_camera_id']
+        if 2 in sps_camera_ids or 6 in sps_camera_ids or 10 in sps_camera_ids or 14 in sps_camera_ids:
+            resolution = "r"
+        else:
+            resolution = "m"
+
         exptimes = self.df['exptime']
         obstime = self.df['time_exp_end'][0]
         obstime = obstime.tz_localize('US/Hawaii')
@@ -726,6 +731,7 @@ class Condition(object):
                     pfsArm = PfsArm.readFits(os.path.join(_pfsArmDataDir, pfsArmFilename))
             except:
                 pfsArm = None
+
             # get raw data
             rawFiles = glob.glob(os.path.join(
                 _rawDataDir, f'raw_PFS_{visit:06d}_??_PFS_raw_all.fits'))
@@ -945,7 +951,6 @@ class Condition(object):
             logger.info(f'visit={visit} skipped...')
 
         # populate database (sky table)
-
         data = {'pfs_visit_id': [visit],
                 'sky_background_b_mean': [sky_mean[0]],
                 'sky_background_b_median': [sky_median[0]],
@@ -967,6 +972,7 @@ class Condition(object):
                 'agc_background_median': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_median'].values,
                 'agc_background_sigma': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_sigma'].values,
                 }
+
         df1 = pd.DataFrame(data)
         self.qadb.populateQATable('sky', df1, updateDB=updateDB)
         if self.df_sky_background_stats_pv is None:
@@ -1048,6 +1054,11 @@ class Condition(object):
         self.df = self.getSpsExposure(visit=visit)
         pfs_visit_id = self.df['pfs_visit_id'].astype(int)
         sps_camera_ids = self.df['sps_camera_id']
+        if 2 in sps_camera_ids or 6 in sps_camera_ids or 10 in sps_camera_ids or 14 in sps_camera_ids:
+            resolution = "r"
+        else:
+            resolution = "m"
+
         exptimes = self.df['exptime']
         obstime = self.df['time_exp_end'][0]
         obstime = obstime.tz_localize('US/Hawaii')
@@ -1174,7 +1185,7 @@ class Condition(object):
             logger.info(
                 f"{len(throughput)} FLUXSTDs are used to calculate")
             throughput = np.array(throughput).T
-
+            
             # calculate background level (mean over fibers) per visit
             throughput_mean = []
             # calculate background level (median over fibers) per visit
@@ -1193,19 +1204,19 @@ class Condition(object):
                     if ~np.isnan(val_ave):
                         throughput_mean.append(val_ave)
                     else:
-                        throughput_mean.append(-1)
+                        throughput_mean.append(np.nan)
                     if ~np.isnan(val_med):
                         throughput_median.append(val_med)
                     else:
-                        throughput_median.append(-1)
+                        throughput_median.append(np.nan)
                     if ~np.isnan(val_std):
                         throughput_stddev.append(val_std)
                     else:
-                        throughput_stddev.append(-1)
+                        throughput_stddev.append(np.nan)
                 else:
-                    throughput_mean.append(-1)
-                    throughput_median.append(-1)
-                    throughput_stddev.append(-1)
+                    throughput_mean.append(np.nan)
+                    throughput_median.append(np.nan)
+                    throughput_stddev.append(np.nan)
             # store info into dataframe
             data = {'pfs_visit_id': [visit for _ in range(len(SpectraFluxstd))],
                     'fiber_id': SpectraFluxstd.fiberId,
@@ -1221,9 +1232,9 @@ class Condition(object):
                     [self.df_throughput, df], ignore_index=True)
         else:
             logger.info(f'visit={visit} skipped...')
-            throughput_mean = [-1, -1, -1, -1]
-            throughput_median = [-1, -1, -1, -1]
-            throughput_stddev = [-1, -1, -1, -1]
+            throughput_mean = [np.nan, np.nan, np.nan, np.nan]
+            throughput_median = [np.nan, np.nan, np.nan, np.nan]
+            throughput_stddev = [np.nan, np.nan, np.nan, np.nan]
                 
         # populate database (throughput table)
         data = {'pfs_visit_id': [visit],
