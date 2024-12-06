@@ -68,6 +68,7 @@ class ExposureTime(object):
 
         # nominal values etc.
         self.TEXP_NOMINAL = self.conf['qa']['exptime']['nominal']
+        self.TEXP_MAX = self.conf['qa']['exptime']['max_effective']        
         self.SEEING_NOMINAL = self.conf['qa']['seeing']['nominal']
         self.TRANSPARENCY_NOMINAL = self.conf['qa']['transparency']['nominal']
         self.NOISE_LEVEL_NOMINAL_B = self.conf['qa']['sky']['noise_nominal_b']
@@ -209,6 +210,16 @@ class ExposureTime(object):
                 self.t_effective_r = self.TEXP_NOMINAL / noise_r**2 * xi**2 * eta_r**2
                 self.t_effective_n = self.TEXP_NOMINAL / noise_n**2 * xi**2 * eta_n**2
                 self.t_effective_m = self.TEXP_NOMINAL / noise_m**2 * xi**2 * eta_m**2
+
+        # apply a cap for effective exposure time
+        if self.t_effective_b > self.TEXP_MAX:
+            self.t_effective_b = self.TEXP_MAX
+        if self.t_effective_r > self.TEXP_MAX:
+            self.t_effective_r = self.TEXP_MAX
+        if self.t_effective_n > self.TEXP_MAX:
+            self.t_effective_n = self.TEXP_MAX
+        if self.t_effective_m > self.TEXP_MAX:
+            self.t_effective_m = self.TEXP_MAX
 
         # insert into qaDB
         df = pd.DataFrame(

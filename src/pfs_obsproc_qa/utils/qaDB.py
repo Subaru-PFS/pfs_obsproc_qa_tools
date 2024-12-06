@@ -30,6 +30,7 @@ class QaDB(object):
 
     def query(self, sqlCmd):
         df = pd.read_sql(sql=sqlCmd, con=self._conn)
+        df = df.fillna(np.nan)
         return df
 
     def populateQATable(self, tableName, df, updateDB=True):
@@ -76,6 +77,8 @@ class QaDB(object):
                             keys = keys + k + ','
                             if isinstance(v, str):
                                 vals = vals + f"'{v}',"
+                            elif np.isnan(v):
+                                vals = vals + "NULL,"
                             else:
                                 vals = vals + str(v) + ','
                         if len(data) > 1:
@@ -138,6 +141,8 @@ class QaDB(object):
                             keys = keys + k + ','
                             if isinstance(v, str):
                                 vals = vals + f"'{v}',"
+                            elif np.isnan(v):
+                                vals = vals + "NULL,"
                             else:
                                 vals = vals + str(v) + ','
                         if len(data) > 1:
