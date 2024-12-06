@@ -694,7 +694,7 @@ class Condition(object):
             pfsMerged = butler.get("pfsMerged", dataId)
             pfsConfig = butler.get("pfsConfig", dataId)
         else:
-            _rawDataDir = os.path.join(baseDir, "PFS/raw/all/raw")
+            _rawDataDir = os.path.join(baseDir, "PFS/raw/sps/raw")
             dirs = glob.glob(os.path.join(output, "%06d/*" % (visit)))
             dirs.sort(reverse=True)
             run = os.path.basename(dirs[0]) if dirs else None
@@ -702,13 +702,13 @@ class Condition(object):
                 output, "%06d" % (visit), run, "pfsArm")
             _pfsMergedDataDir = os.path.join(
                 output, "%06d" % (visit), run, "pfsMerged", obsdate, "%06d" % (visit))
-            _pfsConfigDataDir = os.path.join(baseDir, "PFS/pfsConfig/pfsConfig", obsdate, "%06d" % (visit))
+            _pfsConfigDataDir = os.path.join(baseDir, "PFS/raw/pfsConfig/pfsConfig", obsdate, "%06d" % (visit))
             try:
                 _pfsDesignId = pfs_design_id
                 _identity = Identity(visit=visit)
                 pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
                 pfsMerged = PfsMerged.readFits(os.path.join(_pfsMergedDataDir, pfsMergedFilename))
-                pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_pfsConfig.fits"
+                pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_raw_pfsConfig.fits"
                 pfsConfigFilename2 = f"pfsConfig-0x{_pfsDesignId:016x}-{visit:06d}.fits"
                 shutil.copy2(os.path.join(_pfsConfigDataDir, pfsConfigFilename1), pfsConfigFilename2)
                 pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=visit,
@@ -798,7 +798,8 @@ class Condition(object):
             for fid, wav, flx, sky, msk in zip(spectraSky.fiberId, spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
                 if fid in fiberIds_used:
                     # FIXME (SKYLINE should be masked)
-                    bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                    bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
+                    #bad = msk != 0
                     flx[bad] = np.nan
                     sky[bad] = np.nan
                     tmp1 = []
@@ -814,12 +815,12 @@ class Condition(object):
                         # sky purturbation sigma
                         if calcMode=='clipped':
                             # sigma_clipped_sigma
-                            _,_,res_sgm_clipped = sigma_clipped_stats(df.res, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                            _,_,res_sgm_clipped = sigma_clipped_stats(df.res, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
                             tmp2.append(res_sgm_clipped)
                         elif calcMode=='iqr':
                             # IQR sigma
                             q25 = np.nanpercentile(df.res, 25, axis=0)
-                            q50 = np.nanpercentile(df.res, 25, axis=0)
+                            q50 = np.nanpercentile(df.res, 50, axis=0)
                             q75 = np.nanpercentile(df.res, 75, axis=0)
                             res_sgm_iqr = 0.741 * (q75 - q25)
                             tmp2.append(res_sgm_iqr)
@@ -839,18 +840,19 @@ class Condition(object):
                 wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
                 dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
                 # FIXME (SKYLINE should be masked)
-                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
+                #bad = msk != 0
                 flx[bad] = np.nan
                 flg = (wav > wc-dw) * (wav < wc+dw)
                 # purturbation sigma
                 if calcMode=='clipped':
                     # sigma_clipped_sigma
-                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
                     data2f.append(res_sgm_clipped)
                 elif calcMode=='iqr':
                     # IQR sigma
                     q25 = np.nanpercentile(flx[flg], 25, axis=0)
-                    q50 = np.nanpercentile(flx[flg], 25, axis=0)
+                    q50 = np.nanpercentile(flx[flg], 50, axis=0)
                     q75 = np.nanpercentile(flx[flg], 75, axis=0)
                     res_sgm_iqr = 0.741 * (q75 - q25)
                     data2f.append(res_sgm_iqr)
@@ -861,18 +863,19 @@ class Condition(object):
                 wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
                 dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
                 # FIXME (SKYLINE should be masked)
-                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
+                #bad = msk != 0
                 flx[bad] = np.nan
                 flg = (wav > wc-dw) * (wav < wc+dw)
                 # purturbation sigma
                 if calcMode=='clipped':
                     # sigma_clipped_sigma
-                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
                     data2s.append(res_sgm_clipped)
                 elif calcMode=='iqr':
                     # IQR sigma
                     q25 = np.nanpercentile(flx[flg], 25, axis=0)
-                    q50 = np.nanpercentile(flx[flg], 25, axis=0)
+                    q50 = np.nanpercentile(flx[flg], 50, axis=0)
                     q75 = np.nanpercentile(flx[flg], 75, axis=0)
                     res_sgm_iqr = 0.741 * (q75 - q25)
                     data2s.append(res_sgm_iqr)
@@ -937,13 +940,13 @@ class Condition(object):
                 #    self.df_science_noise = pd.concat([self.df_science_noise, df2s.copy()], ignore_index=True)
                 # sky = df1['background_level']
                 dat = df1.background_level[df1.fiber_status==FiberStatus.GOOD]
-                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
+                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=1.5)
                 sky_mean.append(val_ave)
                 sky_median.append(val_med)
                 sky_stddev.append(val_std)
                 # noise = df2['noise_level']
                 dat = df2.noise_level[df2.fiber_status==FiberStatus.GOOD]
-                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
+                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=1.5)
                 noise_mean.append(val_ave)
                 noise_median.append(val_med)
                 noise_stddev.append(val_std)
@@ -968,11 +971,10 @@ class Condition(object):
                 'sky_background_m_median': [sky_median[3]],
                 'sky_background_m_sigma': [sky_stddev[3]],
                 'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
-                'agc_background_mean': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_mean'].values,
-                'agc_background_median': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_median'].values,
-                'agc_background_sigma': self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_sigma'].values,
+                'agc_background_mean': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_mean'].values[0]],
+                'agc_background_median': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_median'].values[0]],
+                'agc_background_sigma': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_sigma'].values[0]],
                 }
-
         df1 = pd.DataFrame(data)
         self.qadb.populateQATable('sky', df1, updateDB=updateDB)
         if self.df_sky_background_stats_pv is None:
@@ -1082,7 +1084,7 @@ class Condition(object):
             else:
                 pfsFluxReference = None
         else:
-            _rawDataDir = os.path.join(baseDir, "PFS/raw/all/raw")
+            _rawDataDir = os.path.join(baseDir, "PFS/raw/sps/raw")
             dirs = glob.glob(os.path.join(output, "%06d/*" % (visit)))
             dirs.sort(reverse=True)
             run = os.path.basename(dirs[0]) if dirs else None
@@ -1090,14 +1092,14 @@ class Condition(object):
                 output, "%06d" % (visit), run, "pfsArm")
             _pfsMergedDataDir = os.path.join(
                 output, "%06d" % (visit), run, "pfsMerged", obsdate, "%06d" % (visit))
-            _pfsConfigDataDir = os.path.join(baseDir, "PFS/pfsConfig/pfsConfig", obsdate, "%06d" % (visit))
+            _pfsConfigDataDir = os.path.join(baseDir, "PFS/raw/pfsConfig/pfsConfig", obsdate, "%06d" % (visit))
             _pfsFluxReferenceDataDir = os.path.join(
                 output, "%06d" % (visit), run, "pfsFluxReference", obsdate, "%06d" % (visit))
             try:
                 _pfsDesignId = pfs_design_id
                 pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
                 pfsMerged = PfsMerged.readFits(os.path.join(_pfsMergedDataDir, pfsMergedFilename))
-                pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_pfsConfig.fits"
+                pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_raw_pfsConfig.fits"
                 pfsConfigFilename2 = f"pfsConfig-0x{_pfsDesignId:016x}-{visit:06d}.fits"
                 shutil.copy2(os.path.join(_pfsConfigDataDir, pfsConfigFilename1), pfsConfigFilename2)
                 pfsConfig = PfsConfig.read(pfsDesignId=_pfsDesignId, visit=visit,
@@ -1162,7 +1164,8 @@ class Condition(object):
         if SpectraFluxstd is not None:
             throughput = []
             for fid, wav, flx, msk in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux, SpectraFluxstd.mask):
-                bad = msk & SpectraFluxstd.flags.get('NO_DATA', 'BAD', 'CR', 'SAT') != 0
+                bad = msk & SpectraFluxstd.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
+                #bad = msk != 0
                 flx[bad] = np.nan
                 tmp = []
                 for arm in ["b", "r", "n", "m"]:
