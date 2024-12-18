@@ -11,10 +11,12 @@ from pfs.datamodel.pfsFluxReference import PfsFluxReference
 from .opDB import OpDB
 from .qaDB import QaDB
 from .utils import read_conf
+import logging
 import logzero
 from logzero import logger
 from astropy.io import fits
 from astropy.stats import sigma_clip, sigma_clipped_stats
+from astropy.convolution import convolve, Gaussian1DKernel
 import glob
 import shutil
 
@@ -63,6 +65,9 @@ class Condition(object):
         self.df_seeing = None
         self.df_transparency = None
         self.df_ag_background = None
+        self.df_seeing_list = []
+        self.df_transparency_list = []
+        self.df_ag_background_list = []
         self.df_sky_background = None
         self.df_sky_background_stats_pv = None
         self.df_sky_noise = None
@@ -84,6 +89,8 @@ class Condition(object):
 
         logzero.logfile(self.conf['logger']['logfile'],
                         disableStderrLogger=True)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+        logzero.formatter(formatter)
 
     def getPfsDesign(self, visit):
         sqlWhere = f'pfs_visit.pfs_visit_id={visit}'
@@ -172,12 +179,18 @@ class Condition(object):
         else:
             self.df_guide_error = pd.concat(
                 [self.df_guide_error, df], ignore_index=True)
+        #print("df_guide_error:", len(self.df_guide_error))
 
         ## calculate statistics ##
 
-        offset_mean = np.nanmean(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
-        offset_median = np.nanmedian(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
-        offset_sigma = np.nanstd(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
+        if len(df)>0:
+            offset_mean = np.nanmean(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
+            offset_median = np.nanmedian(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
+            offset_sigma = np.nanstd(np.sqrt(df.guide_delta_ra**2+df.guide_delta_dec**2))
+        else:
+            offset_mean = np.nan
+            offset_median = np.nan
+            offset_sigma = np.nan
 
         data = {'pfs_visit_id': [visit],
                 'number_guide_stars': [self.df_design.num_guide_stars[0]],
@@ -253,10 +266,8 @@ class Condition(object):
         #varia = df['central_image_moment_20_pix'] * df['central_image_moment_02_pix'] - df['central_image_moment_11_pix']**2
         #sigma = self.conf['agc']['ag_pix_scale'] * varia**0.25
        
-        # correction so that the seeing is measured at cobra focal plane and as a Moffat profile
-        sigma = sigma * self.conf['agc']['seeing_correction']
-
-        fwhm = sigma * 2.355
+        # conversion from sigma to FWHM is calculated assumed that the distribution profiles is between Gaussian and Tophat
+        fwhm = sigma * (np.sqrt(2*np.log(2)) + np.sqrt(2))
 
         msk = (magnitude > MAG_THRESH1) * (magnitude < MAG_THRESH2)
 
@@ -277,10 +288,12 @@ class Condition(object):
                 'flags': flags[msk],
                 }
         df = pd.DataFrame(data)
-        if self.df_seeing is None:
-            self.df_seeing = df.copy()
-        else:
-            self.df_seeing = pd.concat([self.df_seeing, df], ignore_index=True)
+        #if self.df_seeing is None:
+        #    self.df_seeing = df.copy()
+        #else:
+        #    self.df_seeing = pd.concat([self.df_seeing, df], ignore_index=True)
+        self.df_seeing_list.append(df)
+        #print("df_seeing:", len(self.df_seeing))
 
         # calculate typical values per agc_exposure_id
         taken_at_seq = []
@@ -310,7 +323,6 @@ class Condition(object):
         else:
             self.df_seeing_stats = pd.concat(
                 [self.df_seeing_stats, df], ignore_index=True)
-
         # calculate typical values per pfs_visit_id
         visit_p_visit = []
         fwhm_mean_p_visit = []    # calculate mean per visit
@@ -342,7 +354,7 @@ class Condition(object):
                 'wavelength_ref': [self.conf["qa"]["seeing"]["ref_wav"] for _ in visit_p_visit],
                 }
         df = pd.DataFrame(data)    
-        df = df.fillna(-1.0).astype(float)
+        #df = df.fillna(-1.0).astype(float)
         self.qadb.populateQATable('seeing', df, updateDB=updateDB)
 
         if self.df_seeing_stats_pv is None:
@@ -361,7 +373,7 @@ class Condition(object):
                 'taken_at': self.df_seeing_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 }
             df = pd.DataFrame(data)
-            df = df.fillna(-1.0)
+            #df = df.fillna(-1.0).astype(float)
             self.qadb.populateQATable2(
                 'seeing_agc_exposure', df, updateDB=updateDB)
 
@@ -428,11 +440,13 @@ class Condition(object):
                 'transp': transp[msk],
                 'flags': flags[msk],}
         df = pd.DataFrame(data)
-        if self.df_transparency is None:
-            self.df_transparency = df.copy()
-        else:
-            self.df_transparency = pd.concat(
-                [self.df_transparency, df], ignore_index=True)
+        #if self.df_transparency is None:
+        #    self.df_transparency = df.copy()
+        #else:
+        #    self.df_transparency = pd.concat(
+        #        [self.df_transparency, df], ignore_index=True)
+        self.df_transparency_list.append(df)
+        #print("df_transparency:", len(self.df_transparency))
 
         taken_at_seq = []
         agc_exposure_seq = []
@@ -551,11 +565,13 @@ class Condition(object):
                 'flags': flags,
                 }
         df = pd.DataFrame(data)
-        if self.df_ag_background is None:
-            self.df_ag_background = df.copy()
-        else:
-            self.df_ag_background = pd.concat(
-                [self.df_ag_background, df], ignore_index=True)
+        #if self.df_ag_background is None:
+        #    self.df_ag_background = df.copy()
+        #else:
+        #    self.df_ag_background = pd.concat(
+        #        [self.df_ag_background, df], ignore_index=True)
+        self.df_ag_background_list.append(df)
+        #print("df_ag_background:", len(self.df_ag_background))
 
         taken_at_seq = []
         agc_exposure_seq = []
@@ -638,7 +654,7 @@ class Condition(object):
         usePfsSingle : bool, optional
             Flag indicating whether to use the single PFS data. Default is False.
         calcMode : str, optional
-            Calculation method for statistics (clipped/iqr)
+            Calculation method for statistics (clipped/iqr) default: iqr
         updateDB : bool, optional
             Flag indicating whether to update the database. Default is True.
 
@@ -669,13 +685,12 @@ class Condition(object):
         # get visit information
         self.df = self.getSpsExposure(visit=visit)       
         pfs_visit_id = self.df['pfs_visit_id'].astype(int)
-        sps_camera_ids = self.df['sps_camera_id']
-        if 2 in sps_camera_ids or 6 in sps_camera_ids or 10 in sps_camera_ids or 14 in sps_camera_ids:
-            resolution = "r"
-        else:
+        sps_camera_ids = self.df['sps_camera_id'].tolist()
+        resolution = "r"
+        if 4 in sps_camera_ids or 8 in sps_camera_ids or 12 in sps_camera_ids or 16 in sps_camera_ids:
             resolution = "m"
 
-        exptimes = self.df['exptime']
+        exptime = np.nanmedian(self.df['exptime'])
         obstime = self.df['time_exp_end'][0]
         obstime = obstime.tz_localize('US/Hawaii')
         obstime = obstime.tz_convert('UTC')
@@ -706,7 +721,7 @@ class Condition(object):
             try:
                 _pfsDesignId = pfs_design_id
                 _identity = Identity(visit=visit)
-                pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_').replace('.', '_') + f"_{visit:06d}_{run}.fits"
                 pfsMerged = PfsMerged.readFits(os.path.join(_pfsMergedDataDir, pfsMergedFilename))
                 pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_raw_pfsConfig.fits"
                 pfsConfigFilename2 = f"pfsConfig-0x{_pfsDesignId:016x}-{visit:06d}.fits"
@@ -724,10 +739,10 @@ class Condition(object):
                     spectrograph = spectrograph[0]
                 arm = self.skyQaConf["ref_arm_sky"]
                 try:
-                    pfsArmFilename = f"pfsArm_PFS_{visit:06d}_{arm}{spectrograph}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                    pfsArmFilename = f"pfsArm_PFS_{visit:06d}_{arm}{spectrograph}_" + _drpDataConf["output"].replace('/', '_').replace('.', '_') + f"_{visit:06d}_{run}.fits"
                     pfsArm = PfsArm.readFits(os.path.join(_pfsArmDataDir, pfsArmFilename))
                 except:
-                    pfsArmFilename = f"pfsArm_PFS_{visit:06d}_m{spectrograph}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                    pfsArmFilename = f"pfsArm_PFS_{visit:06d}_m{spectrograph}_" + _drpDataConf["output"].replace('/', '_').replace('.', '_') + f"_{visit:06d}_{run}.fits"
                     pfsArm = PfsArm.readFits(os.path.join(_pfsArmDataDir, pfsArmFilename))
             except:
                 pfsArm = None
@@ -751,12 +766,9 @@ class Condition(object):
         if usePfsMerged is True:
             logger.info(f"pfsMerged is used")
             if pfsMerged is not None:
-                spectraSky = pfsMerged.select(
-                    pfsConfig=pfsConfig, targetType=TargetType.SKY)
-                spectraFluxstd = pfsMerged.select(
-                    pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
-                spectraScience = pfsMerged.select(
-                    pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
+                spectraSky = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.SKY)
+                spectraFluxstd = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                spectraScience = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.SCIENCE)
                 fiberStatusSky = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraSky.fiberId])
                 fiberStatusFluxstd = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraFluxstd.fiberId])
                 fiberStatusScience = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in spectraScience.fiberId])
@@ -786,102 +798,57 @@ class Condition(object):
                 fiberStatusSky = None
                 fiberStatusFluxstd = None
                 fiberStatusScience = None
+
         if spectraSky is not None:
 
+            # select fiberIds to be used for the calculation
             fiberIds_used = []
+            fiberIds_not_used = []
             for sp in self.conf["qa"]["sky"]["ref_spectrograph_sky"]:
                 fiberIds_used += list(pfsConfig[pfsConfig.spectrograph==sp].fiberId)
+                if sp in [2, 4]:
+                    fiberIds_not_used += list(pfsConfig[pfsConfig.spectrograph==sp].fiberId)
+            fiberIds_used = [fid for fid in fiberIds_used if pfsConfig[pfsConfig.fiberId==fid].fiberStatus[0] == FiberStatus.GOOD]
+            spectraSkySelected = spectraSky.select(pfsConfig, fiberId=fiberIds_used)
+            logger.info(f"{len(spectraSkySelected)} SKYs are used to calculate background")
+
+            # do not use SM2 & SM4 for NIR calculation for now (FIXME)
+            logger.info("remove SM2 & 4 from calculation for now...")
+
+            spec_wavelength = []
+            spec_flux = []
+            spec_sky = []
+            for fid in spectraSkySelected.fiberId:
+                msk = spectraSkySelected.fiberId == fid
+                wav = spectraSkySelected[msk].wavelength[0]
+                flx = spectraSkySelected[msk].flux[0]
+                sky = spectraSkySelected[msk].sky[0]
+                if fid in fiberIds_not_used:
+                    flx[wav>950.] = np.nan
+                    sky[wav>950.] = np.nan
+                flx[flx==0] = np.nan
+                spec_wavelength.append(list(wav))
+                spec_flux.append(list(flx))
+                spec_sky.append(list(sky))
+            spec_wavelength = np.array(spec_wavelength)
+            spec_flux = np.array(spec_flux)
+            spec_sky = np.array(spec_sky)
 
             # background noise level measured from SKY fibers
-            data1 = []
-            data2 = []
-            for fid, wav, flx, sky, msk in zip(spectraSky.fiberId, spectraSky.wavelength, spectraSky.flux, spectraSky.sky, spectraSky.mask):
-                if fid in fiberIds_used:
-                    # FIXME (SKYLINE should be masked)
-                    bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
-                    #bad = msk != 0
-                    flx[bad] = np.nan
-                    sky[bad] = np.nan
-                    tmp1 = []
-                    tmp2 = []
-                    for arm in ["b", "r", "n", "m"]:
-                        wc = self.conf["qa"]["ref_wav"][f"ref_wav_{arm}"]
-                        dw = self.conf["qa"]["ref_wav"][f"ref_dwav_{arm}"]
-                        flg = (wav > wc - dw) * (wav < wc + dw)
-                        df = pd.DataFrame({'sky': sky[flg], 'res': flx[flg]})
-                        # median sky background level
-                        _,sky_med,_ = sigma_clipped_stats(df.sky, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
-                        tmp1.append(sky_med)
-                        # sky purturbation sigma
-                        if calcMode=='clipped':
-                            # sigma_clipped_sigma
-                            _,_,res_sgm_clipped = sigma_clipped_stats(df.res, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
-                            tmp2.append(res_sgm_clipped)
-                        elif calcMode=='iqr':
-                            # IQR sigma
-                            q25 = np.nanpercentile(df.res, 25, axis=0)
-                            q50 = np.nanpercentile(df.res, 50, axis=0)
-                            q75 = np.nanpercentile(df.res, 75, axis=0)
-                            res_sgm_iqr = 0.741 * (q75 - q25)
-                            tmp2.append(res_sgm_iqr)
-                else:
-                    tmp1 = []
-                    tmp2 = []
-                    for arm in ["b", "r", "n", "m"]:
-                        tmp1.append(np.nan)
-                        tmp2.append(np.nan)
-                data1.append(tmp1)
-                data2.append(tmp2)
-            logger.info(f"{len(data1)} SKYs are used to calculate background")
 
-            # background noise level measured from FLUXSTD fibers
-            data2f = []
-            for wav, flx, msk in zip(spectraFluxstd.wavelength, spectraFluxstd.flux, spectraFluxstd.mask):
-                wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
-                dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
-                # FIXME (SKYLINE should be masked)
-                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
-                #bad = msk != 0
-                flx[bad] = np.nan
-                flg = (wav > wc-dw) * (wav < wc+dw)
-                # purturbation sigma
-                if calcMode=='clipped':
-                    # sigma_clipped_sigma
-                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
-                    data2f.append(res_sgm_clipped)
-                elif calcMode=='iqr':
-                    # IQR sigma
-                    q25 = np.nanpercentile(flx[flg], 25, axis=0)
-                    q50 = np.nanpercentile(flx[flg], 50, axis=0)
-                    q75 = np.nanpercentile(flx[flg], 75, axis=0)
-                    res_sgm_iqr = 0.741 * (q75 - q25)
-                    data2f.append(res_sgm_iqr)
-
-            # background noise level measured from SCIENCE fibers
-            data2s = []
-            for wav, flx, msk in zip(spectraScience.wavelength, spectraScience.flux, spectraScience.mask):
-                wc = self.conf["qa"]["ref_wav"]["ref_wav_r"]
-                dw = self.conf["qa"]["ref_wav"]["ref_dwav_r"]
-                # FIXME (SKYLINE should be masked)
-                bad = msk & spectraSky.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
-                #bad = msk != 0
-                flx[bad] = np.nan
-                flg = (wav > wc-dw) * (wav < wc+dw)
-                # purturbation sigma
-                if calcMode=='clipped':
-                    # sigma_clipped_sigma
-                    _,_,res_sgm_clipped = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
-                    data2s.append(res_sgm_clipped)
-                elif calcMode=='iqr':
-                    # IQR sigma
-                    q25 = np.nanpercentile(flx[flg], 25, axis=0)
-                    q50 = np.nanpercentile(flx[flg], 50, axis=0)
-                    q75 = np.nanpercentile(flx[flg], 75, axis=0)
-                    res_sgm_iqr = 0.741 * (q75 - q25)
-                    data2s.append(res_sgm_iqr)
-            data1 = np.array(data1).T
-            data2 = np.array(data2).T
-            # store info into dataframe
+            wav_med = np.nanmedian(spec_wavelength, axis=0)
+            sky_med = np.nanmedian(spec_sky / np.sqrt(exptime), axis=0)
+            sky_ave = np.nanmean(spec_sky / np.sqrt(exptime), axis=0)
+            # calc sigma
+            if calcMode == 'clipped':
+                raise NotImplementedError
+            elif calcMode == 'iqr':
+                q25 = np.nanpercentile(spec_flux / np.sqrt(exptime), 25, axis=0)
+                q75 = np.nanpercentile(spec_flux / np.sqrt(exptime), 75, axis=0)
+                res_sgm_iqr = 0.741 * (q75 - q25)
+                q25 = np.nanpercentile(spec_sky / np.sqrt(exptime), 25, axis=0)
+                q75 = np.nanpercentile(spec_sky / np.sqrt(exptime), 75, axis=0)
+                sky_sgm_iqr = 0.741 * (q75 - q25)
 
             # calculate background level (mean over fibers) per visit
             sky_mean = []
@@ -895,88 +862,65 @@ class Condition(object):
             noise_median = []
             # calculate noise level (stddev over fibers) per visit
             noise_stddev = []
-            for i,arm in enumerate(["b", "r", "n", "m"]):
-                data = {'fiber_id': spectraSky.fiberId,
-                        'fiber_status': fiberStatusSky,
-                        'background_level': data1[i],
-                        }
-                df1 = pd.DataFrame(data)
-                #self.df_sky_background = df1.copy()                
-                if self.df_sky_background is None:
-                    self.df_sky_background = df1.copy()
-                else:
-                    self.df_sky_background = pd.concat([self.df_sky_background, df1.copy()], ignore_index=True)
-
-                data = {'fiber_id': spectraSky.fiberId,
-                        'fiber_status': fiberStatusSky,
-                        'noise_level': data2[i],
-                        }
-                df2 = pd.DataFrame(data)
-                data = {'fiber_id': spectraFluxstd.fiberId,
-                        'fiber_status': fiberStatusFluxstd,
-                        'noise_level': data2f,
-                        }
-                df2f = pd.DataFrame(data)
-                data = {'fiber_id': spectraScience.fiberId,
-                        'fiber_status': fiberStatusScience,
-                        'noise_level': data2s,
-                        }
-                df2s = pd.DataFrame(data)
-                self.df_sky_noise = df2.copy()
-                #if self.df_sky_noise is None:
-                #    self.df_sky_noise = df2.copy()
-                #else:
-                #    self.df_sky_noise = pd.concat([self.df_sky_noise, df2.copy()], ignore_index=True)
-
-                self.df_flxstd_noise = df2f.copy()
-                #if self.df_flxstd_noise is None:
-                #    self.df_flxstd_noise = df2f.copy()
-                #else:
-                #    self.df_flxstd_noise = pd.concat([self.df_flxstd_noise, df2f.copy()], ignore_index=True)
-                self.df_science_noise = df2s.copy()
-                #if self.df_science_noise is None:
-                #    self.df_science_noise = df2s.copy()
-                #else:
-                #    self.df_science_noise = pd.concat([self.df_science_noise, df2s.copy()], ignore_index=True)
-                # sky = df1['background_level']
-                dat = df1.background_level[df1.fiber_status==FiberStatus.GOOD]
-                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=1.5)
-                sky_mean.append(val_ave)
-                sky_median.append(val_med)
-                sky_stddev.append(val_std)
-                # noise = df2['noise_level']
-                dat = df2.noise_level[df2.fiber_status==FiberStatus.GOOD]
-                val_ave,val_med,val_std = sigma_clipped_stats(dat, cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=1.5)
-                noise_mean.append(val_ave)
-                noise_median.append(val_med)
-                noise_stddev.append(val_std)
+            for arm in ["b", "r", "n", "m"]:
+                wc = self.conf["qa"]["ref_wav"][f"ref_wav_{arm}"]
+                dw = self.conf["qa"]["ref_wav"][f"ref_dwav_{arm}"]
+                flg = (wav_med > wc - dw) * (wav_med < wc + dw)
+                # sky background level
+                _,tmp1,_ = sigma_clipped_stats(sky_ave[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                _,tmp2,_ = sigma_clipped_stats(sky_med[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                _,tmp3,_ = sigma_clipped_stats(sky_sgm_iqr[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                sky_mean.append(tmp1)
+                sky_median.append(tmp2)
+                sky_stddev.append(tmp3)
+                # noise level
+                tmp1,tmp2,tmp3 = sigma_clipped_stats(res_sgm_iqr[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=1.5)
+                noise_mean.append(tmp1)
+                noise_median.append(tmp2)
+                noise_stddev.append(tmp3)
         else:
             logger.info(f'visit={visit} skipped...')
+        
+        # remove unnecessary arm info
+        if resolution == "r":
+            sky_mean[3] = np.nan
+            sky_median[3] = np.nan
+            sky_stddev[3] = np.nan
+            noise_mean[3] = np.nan
+            noise_median[3] = np.nan
+            noise_stddev[3] = np.nan
+        else:
+            sky_mean[1] = np.nan
+            sky_median[1] = np.nan
+            sky_stddev[1] = np.nan
+            noise_mean[1] = np.nan
+            noise_median[1] = np.nan
+            noise_stddev[1] = np.nan
 
         # populate database (sky table)
-        data = {'pfs_visit_id': [visit],
-                'sky_background_b_mean': [sky_mean[0]],
-                'sky_background_b_median': [sky_median[0]],
-                'sky_background_b_sigma': [sky_stddev[0]],
-                'wavelength_ref_b': [self.conf["qa"]["ref_wav"]["ref_wav_b"]],
-                'sky_background_r_mean': [sky_mean[1]],
-                'sky_background_r_median': [sky_median[1]],
-                'sky_background_r_sigma': [sky_stddev[1]],
-                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"]],
-                'sky_background_n_mean': [sky_mean[2]],
-                'sky_background_n_median': [sky_median[2]],
-                'sky_background_n_sigma': [sky_stddev[2]],
-                'wavelength_ref_n': [self.conf["qa"]["ref_wav"]["ref_wav_n"]],
-                'sky_background_m_mean': [sky_mean[3]],
-                'sky_background_m_median': [sky_median[3]],
-                'sky_background_m_sigma': [sky_stddev[3]],
-                'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
-                'agc_background_mean': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_mean'].values[0]],
-                'agc_background_median': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_median'].values[0]],
-                'agc_background_sigma': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_sigma'].values[0]],
-                }
-        df1 = pd.DataFrame(data)
+        df1 = pd.DataFrame({'pfs_visit_id': [visit],
+                            'sky_background_b_mean': [sky_mean[0]],
+                            'sky_background_b_median': [sky_median[0]],
+                            'sky_background_b_sigma': [sky_stddev[0]],
+                            'wavelength_ref_b': [self.conf["qa"]["ref_wav"]["ref_wav_b"]],
+                            'sky_background_r_mean': [sky_mean[1]],
+                            'sky_background_r_median': [sky_median[1]],
+                            'sky_background_r_sigma': [sky_stddev[1]],
+                            'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"]],
+                            'sky_background_n_mean': [sky_mean[2]],
+                            'sky_background_n_median': [sky_median[2]],
+                            'sky_background_n_sigma': [sky_stddev[2]],
+                            'wavelength_ref_n': [self.conf["qa"]["ref_wav"]["ref_wav_n"]],
+                            'sky_background_m_mean': [sky_mean[3]],
+                            'sky_background_m_median': [sky_median[3]],
+                            'sky_background_m_sigma': [sky_stddev[3]],
+                            'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
+                            'agc_background_mean': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_mean'].values[0]],
+                            'agc_background_median': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_median'].values[0]],
+                            'agc_background_sigma': [self.df_ag_background_stats_pv.query(f"pfs_visit_id=={visit}")['ag_background_sigma'].values[0]],
+                            })
         self.qadb.populateQATable('sky', df1, updateDB=updateDB)
+        df1["resolution"] = [resolution]
         if self.df_sky_background_stats_pv is None:
             self.df_sky_background_stats_pv = df1.copy()
         else:
@@ -984,26 +928,26 @@ class Condition(object):
                 [self.df_sky_background_stats_pv, df1.copy()], ignore_index=True)
 
         # populate database (noise table)
-        data = {'pfs_visit_id': [visit],
-                'noise_b_mean': [noise_mean[0]],
-                'noise_b_median': [noise_median[0]],
-                'noise_b_sigma': [noise_stddev[0]],
-                'wavelength_ref_b': [self.conf["qa"]["ref_wav"]["ref_wav_b"]],
-                'noise_r_mean': [noise_mean[1]],
-                'noise_r_median': [noise_median[1]],
-                'noise_r_sigma': [noise_stddev[1]],
-                'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"]],
-                'noise_n_mean': [noise_mean[2]],
-                'noise_n_median': [noise_median[2]],
-                'noise_n_sigma': [noise_stddev[2]],
-                'wavelength_ref_n': [self.conf["qa"]["ref_wav"]["ref_wav_n"]],
-                'noise_m_mean': [noise_mean[3]],
-                'noise_m_median': [noise_median[3]],
-                'noise_m_sigma': [noise_stddev[3]],
-                'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
-                }
-        df2 = pd.DataFrame(data)
+        df2 = pd.DataFrame({'pfs_visit_id': [visit],
+                            'noise_b_mean': [noise_mean[0]],
+                            'noise_b_median': [noise_median[0]],
+                            'noise_b_sigma': [noise_stddev[0]],
+                            'wavelength_ref_b': [self.conf["qa"]["ref_wav"]["ref_wav_b"]],
+                            'noise_r_mean': [noise_mean[1]],
+                            'noise_r_median': [noise_median[1]],
+                            'noise_r_sigma': [noise_stddev[1]],
+                            'wavelength_ref_r': [self.conf["qa"]["ref_wav"]["ref_wav_r"]],
+                            'noise_n_mean': [noise_mean[2]],
+                            'noise_n_median': [noise_median[2]],
+                            'noise_n_sigma': [noise_stddev[2]],
+                            'wavelength_ref_n': [self.conf["qa"]["ref_wav"]["ref_wav_n"]],
+                            'noise_m_mean': [noise_mean[3]],
+                            'noise_m_median': [noise_median[3]],
+                            'noise_m_sigma': [noise_stddev[3]],
+                            'wavelength_ref_m': [self.conf["qa"]["ref_wav"]["ref_wav_m"]],
+                            })
         self.qadb.populateQATable('noise', df2, updateDB=updateDB)
+        df2["resolution"] = [resolution]
         if self.df_sky_noise_stats_pv is None:
             self.df_sky_noise_stats_pv = df2.copy()
         else:
@@ -1036,7 +980,8 @@ class Condition(object):
         >>> obj = Condition()
         >>> obj.calcThroughput(12345)
         """
-        # Add your code here
+        # throughput normalization scale
+        throughput_scale = self.conf["qa"]["exptime"]["nominal"]
         # setup butler
         _drpDataConf = self.conf["drp"]["data"]
         baseDir = _drpDataConf["base"]
@@ -1055,13 +1000,12 @@ class Condition(object):
         # get visit information
         self.df = self.getSpsExposure(visit=visit)
         pfs_visit_id = self.df['pfs_visit_id'].astype(int)
-        sps_camera_ids = self.df['sps_camera_id']
-        if 2 in sps_camera_ids or 6 in sps_camera_ids or 10 in sps_camera_ids or 14 in sps_camera_ids:
-            resolution = "r"
-        else:
+        sps_camera_ids = self.df['sps_camera_id'].tolist()
+        resolution = "r"
+        if 4 in sps_camera_ids or 8 in sps_camera_ids or 12 in sps_camera_ids or 16 in sps_camera_ids:
             resolution = "m"
 
-        exptimes = self.df['exptime']
+        exptime = np.nanmedian(self.df['exptime'])
         obstime = self.df['time_exp_end'][0]
         obstime = obstime.tz_localize('US/Hawaii')
         obstime = obstime.tz_convert('UTC')
@@ -1097,7 +1041,7 @@ class Condition(object):
                 output, "%06d" % (visit), run, "pfsFluxReference", obsdate, "%06d" % (visit))
             try:
                 _pfsDesignId = pfs_design_id
-                pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                pfsMergedFilename = f"pfsMerged_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_').replace('.', '_') + f"_{visit:06d}_{run}.fits"
                 pfsMerged = PfsMerged.readFits(os.path.join(_pfsMergedDataDir, pfsMergedFilename))
                 pfsConfigFilename1 = f"pfsConfig_PFS_{visit:06d}_PFS_raw_pfsConfig.fits"
                 pfsConfigFilename2 = f"pfsConfig-0x{_pfsDesignId:016x}-{visit:06d}.fits"
@@ -1106,7 +1050,7 @@ class Condition(object):
                                             dirName=".")
                 os.remove(pfsConfigFilename2)
                 if usePfsFluxReference is True:
-                    pfsFluxReferenceFilename = f"pfsFluxReference_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_') + f"_{visit:06d}_{run}.fits"
+                    pfsFluxReferenceFilename = f"pfsFluxReference_PFS_{visit:06d}_" + _drpDataConf["output"].replace('/', '_').replace('.', '_') + f"_{visit:06d}_{run}.fits"
                     pfsFluxReference = PfsFluxReference.readFits(os.path.join(_pfsFluxReferenceDataDir, pfsFluxReferenceFilename))
                 else:
                     pfsFluxReference = None
@@ -1145,8 +1089,7 @@ class Condition(object):
         if usePfsMerged is True:
             logger.info(f"pfsMerged is used")
             if pfsMerged is not None:
-                SpectraFluxstd = pfsMerged.select(
-                    pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                SpectraFluxstd = pfsMerged.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
                 fiberStatusFluxstd = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in SpectraFluxstd.fiberId])
             else:
                 SpectraFluxstd = None
@@ -1154,8 +1097,7 @@ class Condition(object):
         else:
             logger.info(f"pfsArm is used")
             if pfsArm is not None:
-                SpectraFluxstd = pfsArm.select(
-                    pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
+                SpectraFluxstd = pfsArm.select(pfsConfig=pfsConfig, targetType=TargetType.FLUXSTD)
                 fiberStatusFluxstd = np.array([status for fid,status in zip(pfsConfig.fiberId, pfsConfig.fiberStatus) if fid in SpectraFluxstd.fiberId])
             else:
                 SpectraFluxstd = None
@@ -1163,10 +1105,11 @@ class Condition(object):
 
         if SpectraFluxstd is not None:
             throughput = []
-            for fid, wav, flx, msk in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux, SpectraFluxstd.mask):
+            for fid, wav, flx, var, msk in zip(SpectraFluxstd.fiberId, SpectraFluxstd.wavelength, SpectraFluxstd.flux, SpectraFluxstd.variance, SpectraFluxstd.mask):
                 bad = msk & SpectraFluxstd.flags.get('NO_DATA', 'BAD', 'CR', 'SAT', 'REFLINE') != 0
                 #bad = msk != 0
                 flx[bad] = np.nan
+                flx[flx==0] = np.nan
                 tmp = []
                 for arm in ["b", "r", "n", "m"]:
                     wc = self.conf["qa"]["ref_wav"][f"ref_wav_{arm}"]
@@ -1174,16 +1117,24 @@ class Condition(object):
                     if usePfsFluxReference is True:
                         wav_pfr = np.array(pfsFluxReference.wavelength.tolist())
                         flx_pfr = pfsFluxReference.flux[pfsFluxReference.fiberId == fid][0]
+                        flx_pfr = convolve(flx_pfr, Gaussian1DKernel(13))
                         flg = (wav_pfr > wc - dw) * (wav_pfr < wc + dw) # FIXME?
-                        _,refFlux,_ = sigma_clipped_stats(flx_pfr[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=3.0)
-                        #logger.info(f'pfsFluxReference is used...')
+                        #_,refFlux,_ = sigma_clipped_stats(flx_pfr[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=3.0)
+                        refFlux = np.nanmedian(flx_pfr[flg])
+                        logger.info(f'pfsFluxReference is used...')
                     else:
                         refFlux = pfsConfig[pfsConfig.fiberId == fid].psfFlux[0][idx_psfFlux]
-                        #logger.info(f'psfFlux is used...')
+                        logger.info(f'psfFlux is used...')
                     # FIXME (SKYLINE should be masked)
-                    flg = (wav > wc - dw) * (wav < wc + dw)
-                    _,meaFlux,_ = sigma_clipped_stats(flx[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=3.0, sigma_upper=3.0)
-                    tmp.append(meaFlux / refFlux)
+                    #bad = msk & ~SpectraFluxstd.flags.get("REFLINE") != 0
+                    bad = msk != 0
+                    flg = (wav > wc - dw) * (wav < wc + dw) * ~bad
+                    meaFlux = np.nanmedian(flx[flg] / exptime)
+                    meaVari = np.nanmedian(var[flg] / exptime**2)
+                    if meaFlux / np.sqrt(meaVari) > self.conf["qa"]["throughput"]["fluxstd_snr"]:
+                        tmp.append(meaFlux / refFlux * throughput_scale)
+                    else:
+                        tmp.append(np.nan)
                 throughput.append(tmp)
             logger.info(
                 f"{len(throughput)} FLUXSTDs are used to calculate")
@@ -1239,6 +1190,16 @@ class Condition(object):
             throughput_median = [np.nan, np.nan, np.nan, np.nan]
             throughput_stddev = [np.nan, np.nan, np.nan, np.nan]
                 
+        # remove unnecessary arm info
+        if resolution == "r":
+            throughput_mean[3] = np.nan
+            throughput_median[3] = np.nan
+            throughput_stddev[3] = np.nan
+        else:
+            throughput_mean[1] = np.nan
+            throughput_median[1] = np.nan
+            throughput_stddev[1] = np.nan
+
         # populate database (throughput table)
         data = {'pfs_visit_id': [visit],
                 'throughput_b_mean': [throughput_mean[0]],
@@ -1260,12 +1221,12 @@ class Condition(object):
                 }
         df = pd.DataFrame(data)
         self.qadb.populateQATable('throughput', df, updateDB=updateDB)
+        df["resolution"] = [resolution]
         if self.df_throughput_stats_pv is None:
             self.df_throughput_stats_pv = df.copy()
         else:
             self.df_throughput_stats_pv = pd.concat(
                 [self.df_throughput_stats_pv, df], ignore_index=True)
-
 
     def getMoonCondition(self, visit, rawFile, updateDB=True):
         """
@@ -1689,6 +1650,19 @@ class Condition(object):
             else:
                 logger.warning(f"already calculated for visit={visit}...")
                 pass
+        if len(self.df_seeing_list) > 0:
+            self.df_seeing = pd.concat(self.df_seeing_list, ignore_index=True)
+        else:
+            self.df_seeing = pd.DataFrame()
+        if len(self.df_transparency_list) > 0:
+            self.df_transparency = pd.concat(self.df_transparency_list, ignore_index=True)
+        else:
+            self.df_transparency = pd.DataFrame()
+        if len(self.df_ag_background_list) > 0:
+            self.df_ag_background = pd.concat(self.df_ag_background_list, ignore_index=True)
+        else:
+            self.df_ag_background = pd.DataFrame()
+        
         if showPlot == True:
             self.plotSeeing(cc=cc, xaxis=xaxis, saveFig=saveFig,
                             figName=figName, dirName=dirName)

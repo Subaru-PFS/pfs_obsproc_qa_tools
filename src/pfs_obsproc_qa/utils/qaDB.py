@@ -56,10 +56,10 @@ class QaDB(object):
             df_new = pd.DataFrame(
                 data={k: [v] for k, v in data.items()}
             )
-            try:
-                df_new = df_new.fillna(-1).astype(float)
-            except:
-                df_new = df_new
+            #try:
+            #    df_new = df_new.fillna(-1).astype(float)
+            #except:
+            #    df_new = df_new
             try:
                 if updateDB == True:
                     df_new.to_sql(tableName, self._engine,
@@ -118,10 +118,10 @@ class QaDB(object):
             df_new = pd.DataFrame(
                 data={k: [v] for k, v in data.items()}
             )
-            try:
-                df_new = df_new.fillna(-1).astype(float)
-            except:
-                df_new = df_new
+            #try:
+            #    df_new = df_new.fillna(-1).astype(float)
+            #except:
+            #    df_new = df_new
             try:
                 if updateDB == True:
                     df_new.to_sql(tableName, self._engine,
