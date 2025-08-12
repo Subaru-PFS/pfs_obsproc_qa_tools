@@ -1,0 +1,6 @@
+#!/bin/bash 
+#PBS -l select=1:ncpus=12:mem=70gb
+#PBS -o WORKDIR_TEMPLATE/logs/LOGFILE_TEMPLATE.OU
+#PBS -e WORKDIR_TEMPLATE/logs/LOGFILE_TEMPLATE.ER
+cd WORKDIR_TEMPLATE
+source runs/process_VISITS_TEMPLATE.sh 
