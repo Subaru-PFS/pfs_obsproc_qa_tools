@@ -67,8 +67,10 @@ class ExposureTime(object):
         self.conf = read_conf(conf)
 
         # nominal values etc.
+        self.TEXP_REF = self.conf['qa']['exptime']['nominal']
         self.TEXP_NOMINAL = self.conf['qa']['exptime']['nominal']
         self.TEXP_MAX = self.conf['qa']['exptime']['max_effective']        
+        self.TEXP_MAX_SCALE = self.conf['qa']['exptime']['max_effective_scale']        
         self.SEEING_NOMINAL = self.conf['qa']['seeing']['nominal']
         self.TRANSPARENCY_NOMINAL = self.conf['qa']['transparency']['nominal']
         self.NOISE_LEVEL_NOMINAL_B = self.conf['qa']['sky']['noise_nominal_b']
@@ -95,7 +97,7 @@ class ExposureTime(object):
 
         Returns
         ----------
-            t_nominal: `float` (nominal exposure time in sec.)
+            TEXP_NOMINAL: `float` (nominal exposure time in sec.)
 
         Examples
         ----------
@@ -104,8 +106,8 @@ class ExposureTime(object):
         sqlWhere = f"sps_exposure.pfs_visit_id={visit}"
         sqlCmd = f"SELECT * FROM sps_exposure WHERE {sqlWhere};"
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
-        self.t_nominal = np.nanmean(df["exptime"])
-        return self.t_nominal
+        self.TEXP_NOMINAL = np.nanmean(df["exptime"])
+        return self.TEXP_NOMINAL
     
     def getFiberApertureEffectModel(self):
         """ Read csv file of the fiber aperture effect
@@ -190,7 +192,7 @@ class ExposureTime(object):
         noise_n = noise_level_n / self.NOISE_LEVEL_NOMINAL_N
         noise_m = noise_level_m / self.NOISE_LEVEL_NOMINAL_M
         background = background_level / self.BACKGROUND_LEVEL_NOMINAL
-
+        
         # calculate the effective exposure time
         if self.isFaint is False:
             # object is bright (so object limited)
@@ -212,19 +214,19 @@ class ExposureTime(object):
                 self.t_effective_m = self.TEXP_NOMINAL / noise_m**2 * xi**2 * eta_m**2
 
         # apply a cap for effective exposure time
-        if self.t_effective_b > self.TEXP_MAX:
-            self.t_effective_b = self.TEXP_MAX
-        if self.t_effective_r > self.TEXP_MAX:
-            self.t_effective_r = self.TEXP_MAX
-        if self.t_effective_n > self.TEXP_MAX:
-            self.t_effective_n = self.TEXP_MAX
-        if self.t_effective_m > self.TEXP_MAX:
-            self.t_effective_m = self.TEXP_MAX
+        if self.t_effective_b > self.TEXP_NOMINAL * self.TEXP_MAX_SCALE:
+            self.t_effective_b = self.TEXP_NOMINAL * self.TEXP_MAX_SCALE
+        if self.t_effective_r > self.TEXP_NOMINAL * self.TEXP_MAX_SCALE:
+            self.t_effective_r = self.TEXP_NOMINAL * self.TEXP_MAX_SCALE
+        if self.t_effective_n > self.TEXP_NOMINAL * self.TEXP_MAX_SCALE:
+            self.t_effective_n = self.TEXP_NOMINAL * self.TEXP_MAX_SCALE
+        if self.t_effective_m > self.TEXP_NOMINAL * self.TEXP_MAX_SCALE:
+            self.t_effective_m = self.TEXP_NOMINAL * self.TEXP_MAX_SCALE
 
         # insert into qaDB
         df = pd.DataFrame(
             data={"pfs_visit_id": [visit],
-                  "nominal_exposure_time": [self.t_nominal],
+                  "nominal_exposure_time": [self.TEXP_NOMINAL],
                   "effective_exposure_time_b": [self.t_effective_b],
                   "effective_exposure_time_r": [self.t_effective_r],
                   "effective_exposure_time_n": [self.t_effective_n],
