@@ -7,6 +7,7 @@ import pandas as pd
 from logzero import logger
 
 import warnings
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 
@@ -162,3 +163,29 @@ class QaDB(object):
 
     def close(self):
         self._conn.close()
+
+    def set_onsite_processing_status(self, pfs_visit_id, status):
+        try:
+            # Check if the record exists
+            query = text(f"SELECT COUNT(*) FROM onsite_processing_status WHERE pfs_visit_id = {pfs_visit_id}")
+            with self._engine.connect() as conn:
+                result = conn.execute(query).scalar()
+            if result == 0:
+                # Insert new record if it doesn't exist
+                started_at = datetime.now()
+                insert_query = text(f"INSERT INTO onsite_processing_status (pfs_visit_id, status, started_at) VALUES ({pfs_visit_id}, {status}, '{started_at}')")
+                with self._engine.connect() as conn:
+                    with conn.begin():
+                        conn.execute(insert_query)
+                logger.info(f"Inserted new record for pfs_visit_id={pfs_visit_id} with status={status} and started_at={started_at}!")
+            else:
+                # Update existing record
+                updated_at = datetime.now()
+                update_query = text(f"UPDATE onsite_processing_status SET status = {status}, updated_at = '{updated_at}' WHERE pfs_visit_id = {pfs_visit_id}")
+                with self._engine.connect() as conn:
+                    with conn.begin():
+                        conn.execute(update_query)
+                logger.info(f'Updated record for pfs_visit_id={pfs_visit_id} with status={status}!')
+        except Exception as e:
+            logger.error(f'Error in setting onsite processing status: {e}')
+
