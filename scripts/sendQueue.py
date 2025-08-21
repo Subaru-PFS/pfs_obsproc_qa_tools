@@ -10,6 +10,17 @@ import time
 import toml
 from datetime import datetime, timedelta
 
+# import qa related modules
+try:
+    from pfs_obsproc_qa.utils.obsCondition import Condition
+    from pfs_obsproc_qa.utils.exposureTime import ExposureTime
+    from pfs_obsproc_qa.utils import opDB, qaDB, utils
+except:
+    sys.path.append("/work/kiyoyabe/erun/run22/prep/design/src/pfs_obsproc_qa_tools/src/")
+    from pfs_obsproc_qa.utils.obsCondition import Condition
+    from pfs_obsproc_qa.utils.exposureTime import ExposureTime
+    from pfs_obsproc_qa.utils import opDB, qaDB, utils
+
 def retrieve_data_from_opdb(config, visitStart, visitEnd):
     # Connect to the database
     engine = create_engine(config['database']['opdb']['url'])
@@ -114,6 +125,13 @@ def submit_pbs(pbs_file):
     subprocess.run(['qsub', pbs_file])
     print(f"{pbs_file} sent")
 
+def update_status(config_qa, visit, status=0):
+    conf = toml.load(config_qa)
+    qadb = qaDB.QaDB(conf["db"]["qadb"])
+    qadb.set_onsite_processing_status(pfs_visit_id=visit, status=status)
+    qadb.close()    
+    return 0
+
 def main(config, visitStart, visitEnd, visits):
     """
     Process the data and send a queue for each visit within the specified range.
@@ -203,6 +221,7 @@ def main(config, visitStart, visitEnd, visits):
                                         )
                             if args.sendQueue:
                                 submit_pbs(os.path.join(output_dir, f'process_{visit}.pbs'))
+                            update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
                             print(f"    The number of FLUXSTDs: {ncals}")
                             visitsProcessed.append(visit)
                         time.sleep(time_interval)
@@ -221,6 +240,7 @@ def main(config, visitStart, visitEnd, visits):
                                             )
                                 if args.sendQueue:
                                     submit_pbs(os.path.join(output_dir, f'process_{visit}.pbs'))
+                                update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
                                 print(f"    The number of FLUXSTDs: {ncals}")
                                 visitsProcessed.append(visit)
                             time.sleep(time_interval)
@@ -250,6 +270,7 @@ def main(config, visitStart, visitEnd, visits):
                             )
                 if args.sendQueue:
                     submit_pbs(os.path.join(output_dir, f'process_{visit}.pbs'))
+                update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
                 print(f"    The number of FLUXSTDs: {ncals}")
                 visitsProcessed.append(visit)
                 time.sleep(time_interval)

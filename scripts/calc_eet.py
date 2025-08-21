@@ -78,18 +78,25 @@ def run(workDir, config, visits, skipAg=False, skipDrp=False, useBackground=Fals
         throughput_n = df_throughput.throughput_n_median[df_throughput.pfs_visit_id==visit].values[0]
         throughput_m = df_throughput.throughput_m_median[df_throughput.pfs_visit_id==visit].values[0]
         throughputs = [throughput_b, throughput_r, throughput_n, throughput_m]
-        t_effectives = exp.calcEffectiveExposureTime(visit, seeing, transparency, 
-                                                     throughput_b, throughput_r, throughput_n, throughput_m,
-                                                     background_r, noise_b, noise_r, noise_n, noise_m,
-                                                     useBackground=useBackground, useFluxstd=True, updateDB=updateDB)
-        
-        print(f"visit={visit}:")
-        print(f"    texp_nominal={t_nominal}")
-        print(f"    seeing={seeing}, transparency={transparency}")
-        print(f"    background={backgrounds}")
-        print(f"    noise={noises}")
-        print(f"    throughput={throughputs}")
-        print(f"    eet={t_effectives}")
+        try:
+            t_effectives = exp.calcEffectiveExposureTime(visit, seeing, transparency, 
+                                                        throughput_b, throughput_r, throughput_n, throughput_m,
+                                                        background_r, noise_b, noise_r, noise_n, noise_m,
+                                                        useBackground=useBackground, useFluxstd=True, updateDB=updateDB)
+            print(f"visit={visit}:")
+            print(f"    texp_nominal={t_nominal}")
+            print(f"    seeing={seeing}, transparency={transparency}")
+            print(f"    background={backgrounds}")
+            print(f"    noise={noises}")
+            print(f"    throughput={throughputs}")
+            print(f"    eet={t_effectives}")
+            if sum(not np.isnan(x) for x in t_effectives) >= 3:
+                qadb.set_onsite_processing_status(pfs_visit_id=visit, status=utils.OnsiteStatusType.COMPLETED)
+            else:
+                qadb.set_onsite_processing_status(pfs_visit_id=visit, status=utils.OnsiteStatusType.FAILED)
+        except Exception as e:
+            qadb.set_onsite_processing_status(pfs_visit_id=visit, status=utils.OnsiteStatusType.FAILED)
+
 
 if __name__ == '__main__':
     
