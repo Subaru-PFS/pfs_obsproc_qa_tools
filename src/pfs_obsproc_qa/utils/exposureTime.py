@@ -223,6 +223,13 @@ class ExposureTime(object):
         if self.t_effective_m > self.TEXP_NOMINAL * self.TEXP_MAX_SCALE:
             self.t_effective_m = self.TEXP_NOMINAL * self.TEXP_MAX_SCALE
 
+        # tentative workaround to catch the on-site processing failure
+        if np.isnan([self.t_effective_b, self.t_effective_r, self.t_effective_n, self.t_effective_m]).all():
+            self.t_effective_b = -1.0
+            self.t_effective_r = -1.0
+            self.t_effective_n = -1.0
+            self.t_effective_m = -1.0
+
         # insert into qaDB
         df = pd.DataFrame(
             data={"pfs_visit_id": [visit],

@@ -13,7 +13,7 @@ try:
     from pfs_obsproc_qa.utils.exposureTime import ExposureTime
     from pfs_obsproc_qa.utils import opDB, qaDB, utils
 except:
-    sys.path.append("/work/kiyoyabe/erun/run22/prep/design/src/pfs_obsproc_qa_tools/src/")
+    sys.path.append("/work/kiyoyabe/erun/s25b/prep/design/src/pfs_obsproc_qa_tools/src/")
     from pfs_obsproc_qa.utils.obsCondition import Condition
     from pfs_obsproc_qa.utils.exposureTime import ExposureTime
     from pfs_obsproc_qa.utils import opDB, qaDB, utils
@@ -27,9 +27,14 @@ def run(workDir, config, visits, skipAg=False, skipDrp=False, useBackground=Fals
     config = os.path.join(workDir, f'{config}')
 
     visitMin = min(visits)
-
     print(config)
     cond=Condition(conf=config)
+
+    # setup QA database and read some QA results (seeing, transparency, noise)
+
+    sqlWhere = f"pfs_visit_id>={visitMin}"
+    conf = utils.read_conf(config)
+    qadb = qaDB.QaDB(conf["db"]["qadb"])
 
     # getCondtion from AGC data
     if skipAg is False:
@@ -37,14 +42,13 @@ def run(workDir, config, visits, skipAg=False, skipDrp=False, useBackground=Fals
 
     # getCondtion from DRP products
     if skipDrp is False:
-        cond.getConditionDrp(visits=visits, showPlot=False, xaxis='taken_at', cc='flags', saveFig=True, figName='test_flags', dirName=figDir, usePfsMerged=True, updateDB=updateDB)
-
-    # setup QA database and read some QA results (seeing, transparency, noise)
-
+        try:
+            cond.getConditionDrp(visits=visits, showPlot=False, xaxis='taken_at', cc='flags', saveFig=True, figName='test_flags', dirName=figDir, usePfsMerged=True, updateDB=updateDB)
+        except Exception as e:
+            qadb.set_onsite_processing_status(pfs_visit_id=visitMin, status=utils.OnsiteStatusType.FAILED)
+            raise
+        
     # get effective exposure time 
-    sqlWhere = f"pfs_visit_id>={visitMin}"
-    conf = utils.read_conf(config)
-    qadb = qaDB.QaDB(conf["db"]["qadb"])
     df_seeing = qadb.query(f'SELECT * FROM seeing WHERE {sqlWhere};')
     df_transparency = qadb.query(f'SELECT * FROM transparency WHERE {sqlWhere};')
     df_throughput = qadb.query(f'SELECT * FROM throughput WHERE {sqlWhere};')
@@ -57,28 +61,28 @@ def run(workDir, config, visits, skipAg=False, skipDrp=False, useBackground=Fals
 
     # calculate the effective exposure time for each visit
     for visit in visits:
-        # calc nominal exposure time
-        t_nominal = exp.getNominalExposureTime(visit)
-
-        # real data from QaDB
-        seeing = df_seeing.seeing_median[df_seeing.pfs_visit_id==visit].values[0]
-        transparency = df_transparency.transparency_median[df_transparency.pfs_visit_id==visit].values[0]
-        noise_b = df_sky_noise.noise_b_median[df_sky_noise.pfs_visit_id==visit].values[0]
-        noise_r = df_sky_noise.noise_r_median[df_sky_noise.pfs_visit_id==visit].values[0]
-        noise_n = df_sky_noise.noise_n_median[df_sky_noise.pfs_visit_id==visit].values[0]
-        noise_m = df_sky_noise.noise_m_median[df_sky_noise.pfs_visit_id==visit].values[0]
-        noises = [noise_b, noise_r, noise_n, noise_m]
-        background_b = df_sky_background.sky_background_b_median[df_sky_background.pfs_visit_id==visit].values[0]
-        background_r = df_sky_background.sky_background_r_median[df_sky_background.pfs_visit_id==visit].values[0]
-        background_n = df_sky_background.sky_background_n_median[df_sky_background.pfs_visit_id==visit].values[0]
-        background_m = df_sky_background.sky_background_m_median[df_sky_background.pfs_visit_id==visit].values[0]
-        backgrounds = [background_b, background_r, background_n, background_m]
-        throughput_b = df_throughput.throughput_b_median[df_throughput.pfs_visit_id==visit].values[0]
-        throughput_r = df_throughput.throughput_r_median[df_throughput.pfs_visit_id==visit].values[0]
-        throughput_n = df_throughput.throughput_n_median[df_throughput.pfs_visit_id==visit].values[0]
-        throughput_m = df_throughput.throughput_m_median[df_throughput.pfs_visit_id==visit].values[0]
-        throughputs = [throughput_b, throughput_r, throughput_n, throughput_m]
         try:
+            # calc nominal exposure time
+            t_nominal = exp.getNominalExposureTime(visit)
+
+            # real data from QaDB
+            seeing = df_seeing.seeing_median[df_seeing.pfs_visit_id==visit].values[0]
+            transparency = df_transparency.transparency_median[df_transparency.pfs_visit_id==visit].values[0]
+            noise_b = df_sky_noise.noise_b_median[df_sky_noise.pfs_visit_id==visit].values[0]
+            noise_r = df_sky_noise.noise_r_median[df_sky_noise.pfs_visit_id==visit].values[0]
+            noise_n = df_sky_noise.noise_n_median[df_sky_noise.pfs_visit_id==visit].values[0]
+            noise_m = df_sky_noise.noise_m_median[df_sky_noise.pfs_visit_id==visit].values[0]
+            noises = [noise_b, noise_r, noise_n, noise_m]
+            background_b = df_sky_background.sky_background_b_median[df_sky_background.pfs_visit_id==visit].values[0]
+            background_r = df_sky_background.sky_background_r_median[df_sky_background.pfs_visit_id==visit].values[0]
+            background_n = df_sky_background.sky_background_n_median[df_sky_background.pfs_visit_id==visit].values[0]
+            background_m = df_sky_background.sky_background_m_median[df_sky_background.pfs_visit_id==visit].values[0]
+            backgrounds = [background_b, background_r, background_n, background_m]
+            throughput_b = df_throughput.throughput_b_median[df_throughput.pfs_visit_id==visit].values[0]
+            throughput_r = df_throughput.throughput_r_median[df_throughput.pfs_visit_id==visit].values[0]
+            throughput_n = df_throughput.throughput_n_median[df_throughput.pfs_visit_id==visit].values[0]
+            throughput_m = df_throughput.throughput_m_median[df_throughput.pfs_visit_id==visit].values[0]
+            throughputs = [throughput_b, throughput_r, throughput_n, throughput_m]
             t_effectives = exp.calcEffectiveExposureTime(visit, seeing, transparency, 
                                                         throughput_b, throughput_r, throughput_n, throughput_m,
                                                         background_r, noise_b, noise_r, noise_n, noise_m,
@@ -91,7 +95,10 @@ def run(workDir, config, visits, skipAg=False, skipDrp=False, useBackground=Fals
             print(f"    throughput={throughputs}")
             print(f"    eet={t_effectives}")
             if sum(not np.isnan(x) for x in t_effectives) >= 3:
-                qadb.set_onsite_processing_status(pfs_visit_id=visit, status=utils.OnsiteStatusType.COMPLETED)
+                if sum(x >= 0 for x in t_effectives) >= 3:
+                    qadb.set_onsite_processing_status(pfs_visit_id=visit, status=utils.OnsiteStatusType.COMPLETED)
+                else:
+                    qadb.set_onsite_processing_status(pfs_visit_id=visit, status=utils.OnsiteStatusType.FAILED)
             else:
                 qadb.set_onsite_processing_status(pfs_visit_id=visit, status=utils.OnsiteStatusType.FAILED)
         except Exception as e:

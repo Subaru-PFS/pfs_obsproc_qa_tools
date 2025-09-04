@@ -119,10 +119,6 @@ class QaDB(object):
             df_new = pd.DataFrame(
                 data={k: [v] for k, v in data.items()}
             )
-            #try:
-            #    df_new = df_new.fillna(-1).astype(float)
-            #except:
-            #    df_new = df_new
             try:
                 if updateDB == True:
                     df_new.to_sql(tableName, self._engine,
@@ -181,7 +177,10 @@ class QaDB(object):
             else:
                 # Update existing record
                 updated_at = datetime.now()
-                update_query = text(f"UPDATE onsite_processing_status SET status = {status}, updated_at = '{updated_at}' WHERE pfs_visit_id = {pfs_visit_id}")
+                if status == 0:
+                    update_query = text(f"UPDATE onsite_processing_status SET status = {status}, started_at = '{updated_at}', updated_at = '{updated_at}' WHERE pfs_visit_id = {pfs_visit_id}")
+                else:
+                    update_query = text(f"UPDATE onsite_processing_status SET status = {status}, updated_at = '{updated_at}' WHERE pfs_visit_id = {pfs_visit_id}")
                 with self._engine.connect() as conn:
                     with conn.begin():
                         conn.execute(update_query)
