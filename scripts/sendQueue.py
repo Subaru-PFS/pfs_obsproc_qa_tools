@@ -8,7 +8,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 import time
 import toml
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # import qa related modules
 try:
@@ -191,6 +191,7 @@ def main(config, visitStart, visitEnd, visits):
 
                     # check the elapsed time since the exposure is done
                     try:
+                        #dt = np.datetime64(datetime.now(timezone.utc)) - time_exp_ends[visit]
                         dt = np.datetime64(datetime.now()) - time_exp_ends[visit]
                         dt /= 1e+09
                         dt = float(dt)
@@ -221,7 +222,8 @@ def main(config, visitStart, visitEnd, visits):
                                         )
                             if args.sendQueue:
                                 submit_pbs(os.path.join(output_dir, f'process_{visit}.pbs'))
-                            update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
+                            if not args.noStatusUpdate:
+                                update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
                             print(f"    The number of FLUXSTDs: {ncals}")
                             visitsProcessed.append(visit)
                         time.sleep(time_interval)
@@ -240,7 +242,8 @@ def main(config, visitStart, visitEnd, visits):
                                             )
                                 if args.sendQueue:
                                     submit_pbs(os.path.join(output_dir, f'process_{visit}.pbs'))
-                                update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
+                                if not args.noStatusUpdate:
+                                    update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
                                 print(f"    The number of FLUXSTDs: {ncals}")
                                 visitsProcessed.append(visit)
                             time.sleep(time_interval)
@@ -270,7 +273,8 @@ def main(config, visitStart, visitEnd, visits):
                             )
                 if args.sendQueue:
                     submit_pbs(os.path.join(output_dir, f'process_{visit}.pbs'))
-                update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
+                if not args.noStatusUpdate:
+                    update_status(config_qa, visit, status=utils.OnsiteStatusType.INPROGRESS)
                 print(f"    The number of FLUXSTDs: {ncals}")
                 visitsProcessed.append(visit)
                 time.sleep(time_interval)
@@ -283,6 +287,8 @@ if __name__ == '__main__':
     parser.add_argument('--visitEnd', type=int, default=999999, help='The maximum visit ID to process')
     parser.add_argument('--visits', type=int, nargs='+', default=None, help='If this is specified, just process the specified visits instead of loop processing')
     parser.add_argument('--sendQueue', action='store_true', help='Send the created script to queue')
+    parser.add_argument('--noStatusUpdate', action='store_true', help='not update onsite processing status')
+
     args = parser.parse_args()
 
     config = toml.load(args.config)

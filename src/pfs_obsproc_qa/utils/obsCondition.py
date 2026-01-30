@@ -113,7 +113,7 @@ class Condition(object):
 
         """
         sqlWhere = f'agc_exposure.pfs_visit_id={visit}'
-        sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.agc_exptime,agc_exposure.taken_at,agc_data.agc_camera_id,image_moment_00_pix,central_image_moment_11_pix,central_image_moment_20_pix,central_image_moment_02_pix,peak_intensity,background,estimated_magnitude,agc_data.flags,agc_match.guide_star_id,pfs_design_agc.guide_star_magnitude,pfs_design_agc.guide_star_color FROM agc_exposure JOIN agc_data ON agc_exposure.agc_exposure_id=agc_data.agc_exposure_id JOIN agc_match ON agc_data.agc_exposure_id=agc_match.agc_exposure_id AND agc_data.agc_camera_id=agc_match.agc_camera_id AND agc_data.spot_id=agc_match.spot_id JOIN pfs_design_agc ON agc_match.pfs_design_id=pfs_design_agc.pfs_design_id AND agc_match.guide_star_id=pfs_design_agc.guide_star_id WHERE {sqlWhere} AND agc_data.flags<=1 ORDER BY agc_exposure.agc_exposure_id;'
+        sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.agc_exptime,agc_exposure.taken_at,agc_data.agc_camera_id,image_moment_00_pix,central_image_moment_11_pix,central_image_moment_20_pix,central_image_moment_02_pix,peak_intensity,background,estimated_magnitude,agc_data.flags,agc_match.guide_star_id,pfs_design_agc.guide_star_magnitude,pfs_design_agc.guide_star_color,agc_match.agc_nominal_x_mm, agc_match.agc_nominal_y_mm, agc_match.agc_center_x_mm, agc_match.agc_center_y_mm FROM agc_exposure JOIN agc_data ON agc_exposure.agc_exposure_id=agc_data.agc_exposure_id JOIN agc_match ON agc_data.agc_exposure_id=agc_match.agc_exposure_id AND agc_data.agc_camera_id=agc_match.agc_camera_id AND agc_data.spot_id=agc_match.spot_id JOIN pfs_design_agc ON agc_match.pfs_design_id=pfs_design_agc.pfs_design_id AND agc_match.guide_star_id=pfs_design_agc.guide_star_id WHERE {sqlWhere} AND agc_data.flags<=1 AND agc_match.flags = 1 ORDER BY agc_exposure.agc_exposure_id;'
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
         return df
 
@@ -269,7 +269,9 @@ class Condition(object):
         # conversion from sigma to FWHM is calculated assumed that the distribution profiles is between Gaussian and Tophat
         fwhm = sigma * (np.sqrt(2*np.log(2)) + np.sqrt(2))
 
-        msk = (magnitude > MAG_THRESH1) * (magnitude < MAG_THRESH2)
+        #msk = (magnitude > MAG_THRESH1) * (magnitude < MAG_THRESH2)
+        m75 = np.nanpercentile(magnitude, 75)
+        msk = magnitude <= m75
 
         # correction depending on stellar color
         if corrColor is True:
@@ -354,7 +356,6 @@ class Condition(object):
                 'wavelength_ref': [self.conf["qa"]["seeing"]["ref_wav"] for _ in visit_p_visit],
                 }
         df = pd.DataFrame(data)    
-        #df = df.fillna(-1.0).astype(float)
         self.qadb.populateQATable('seeing', df, updateDB=updateDB)
 
         if self.df_seeing_stats_pv is None:
@@ -373,7 +374,6 @@ class Condition(object):
                 'taken_at': self.df_seeing_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 }
             df = pd.DataFrame(data)
-            #df = df.fillna(-1.0).astype(float)
             self.qadb.populateQATable2(
                 'seeing_agc_exposure', df, updateDB=updateDB)
 
@@ -417,7 +417,16 @@ class Condition(object):
 
         dmag = mag2 - mag1
 
-        msk = (mag1 > MAG_THRESH1) * (mag1 < MAG_THRESH2)
+        #msk = (mag1 > MAG_THRESH1) * (mag1 < MAG_THRESH2)
+        m75 = np.nanpercentile(mag2, 75)
+        msk = mag2 <= m75
+
+        agc_nominal_x_mm = df["agc_nominal_x_mm"]
+        agc_nominal_y_mm = df["agc_nominal_y_mm"]
+        agc_center_x_mm = df["agc_center_x_mm"]
+        agc_center_y_mm = df["agc_center_y_mm"]
+        matched = np.sqrt((agc_center_x_mm - agc_nominal_x_mm)**2 + (agc_center_y_mm - agc_nominal_y_mm)**2) < 1.0
+        msk *= matched
 
         # correction depending on stellar color
         if corrColor is True:
@@ -427,9 +436,10 @@ class Condition(object):
             msk *= (gaia_color > -1.0) * (gaia_color < 3.0)
 
         transp = 10**(-0.4*dmag) / self.conf['agc']['transparency_correction']
-        transp[transp > 2.0] = 2.0
-        transp[transp < 0.0] = 0.0
-
+        msk *= (transp > 0.0) * (transp < 2.0)
+        #transp[transp > 2.0] = 2.0
+        #transp[transp < 0.0] = 0.0
+        transp[~msk] = np.nan
 
         data = {'pfs_visit_id': pfs_visit_id[msk],
                 'agc_exposure_id': agc_exposure_id[msk],
@@ -460,6 +470,7 @@ class Condition(object):
                 agc_exposure_id[agc_exposure_id == s].values[0])
             visit_seq.append(pfs_visit_id[agc_exposure_id == s].values[0])
             data = transp[(agc_exposure_id == s) * msk]
+            #data = transp[(agc_exposure_id == s)]
             if len(data[data.notna()]) > 0:
                 transp_mean.append(data.mean(skipna=True))
                 transp_median.append(data.median(skipna=True))
@@ -481,25 +492,28 @@ class Condition(object):
         else:
             self.df_transparency_stats = pd.concat(
                 [self.df_transparency_stats, df], ignore_index=True)
-
+        visit_seq = self.df_transparency_stats.visit_seq
+        transp_median = self.df_transparency_stats.transp_median
         visit_p_visit = []
         transp_mean_p_visit = []    # calculate mean per visit
         transp_median_p_visit = []  # calculate median per visit
         transp_stddev_p_visit = []  # calculate sigma per visit
-        for v in np.unique(pfs_visit_id):
+        for v in np.unique(visit_seq):
             visit_p_visit.append(int(v))
-            data = transp[pfs_visit_id == v]
-            if len(data[data.notna()]) > 0:
-                dat = data[pfs_visit_id == visit]
-                dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
-                transp_mean_p_visit.append(dat_clip.mean(skipna=True))
-                transp_median_p_visit.append(dat_clip.median(skipna=True))
-                transp_stddev_p_visit.append(dat_clip.std(skipna=True))
+            data = transp_median[visit_seq == v]
+            if len(data[~np.isnan(data)]) > 0:
+                dat = data[visit_seq == visit]
+                #dat_clip = dat.clip(dat.quantile(0.05), dat.quantile(0.95))
+                #transp_mean_p_visit.append(dat_clip.mean(skipna=True))
+                #transp_median_p_visit.append(dat_clip.median(skipna=True))
+                #transp_stddev_p_visit.append(dat_clip.std(skipna=True))
+                transp_mean_p_visit.append(dat.mean(skipna=True))
+                transp_median_p_visit.append(dat.median(skipna=True))
+                transp_stddev_p_visit.append(dat.std(skipna=True))
             else:
                 transp_mean_p_visit.append(np.nan)
                 transp_median_p_visit.append(np.nan)
                 transp_stddev_p_visit.append(np.nan)
-
         # insert into qaDB
         data = {'pfs_visit_id': visit_p_visit,
                 'transparency_mean': transp_mean_p_visit,
@@ -508,8 +522,9 @@ class Condition(object):
                 'wavelength_ref': [self.conf["qa"]["transparency"]["ref_wav"] for _ in visit_p_visit],
                 }
         df = pd.DataFrame(data)
-        df = df.fillna(-1.0).astype(float)
-        self.qadb.populateQATable('transparency', df, updateDB=updateDB)
+        if len(df) > 0:
+            if df.transparency_median[0] > 0:
+                self.qadb.populateQATable('transparency', df, updateDB=updateDB)
         if self.df_transparency_stats_pv is None:
             self.df_transparency_stats_pv = df.copy()
         else:
@@ -526,9 +541,7 @@ class Condition(object):
                 'taken_at': self.df_transparency_stats.taken_at_seq.dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 }
             df = pd.DataFrame(data)
-            df = df.fillna(-1.0)
-            self.qadb.populateQATable2(
-                'transparency_agc_exposure', df, updateDB=updateDB)
+            self.qadb.populateQATable2('transparency_agc_exposure', df, updateDB=updateDB)
 
     def calcAgBackground(self, visit):
         """Calculate Sky Background level based on AGC images
@@ -632,8 +645,6 @@ class Condition(object):
                 'ag_background_sigma': ag_background_stddev_p_visit
                 }
         df = pd.DataFrame(data)
-        df = df.fillna(-1).astype(float)
-        #self.df_ag_background_stats_pv = df.copy()
         if self.df_ag_background_stats_pv is None:
             self.df_ag_background_stats_pv = df.copy()
         else:
@@ -1116,12 +1127,15 @@ class Condition(object):
                     dw = self.conf["qa"]["ref_wav"][f"ref_dwav_{arm}"]
                     if usePfsFluxReference is True:
                         wav_pfr = np.array(pfsFluxReference.wavelength.tolist())
-                        flx_pfr = pfsFluxReference.flux[pfsFluxReference.fiberId == fid][0]
-                        flx_pfr = convolve(flx_pfr, Gaussian1DKernel(13))
-                        flg = (wav_pfr > wc - dw) * (wav_pfr < wc + dw) # FIXME?
-                        #_,refFlux,_ = sigma_clipped_stats(flx_pfr[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=3.0)
-                        refFlux = np.nanmedian(flx_pfr[flg])
-                        logger.info(f'pfsFluxReference is used...')
+                        try:
+                            flx_pfr = pfsFluxReference.flux[pfsFluxReference.fiberId == fid][0]
+                            flx_pfr = convolve(flx_pfr, Gaussian1DKernel(13))
+                            flg = (wav_pfr > wc - dw) * (wav_pfr < wc + dw) # FIXME?
+                            #_,refFlux,_ = sigma_clipped_stats(flx_pfr[flg], cenfunc=np.nanmedian, stdfunc=np.nanstd, sigma_lower=1.5, sigma_upper=3.0)
+                            refFlux = np.nanmedian(flx_pfr[flg])
+                            #logger.info(f'pfsFluxReference is used...')
+                        except:
+                            logger.info(f'fiberId={fid} is missing in pfsFluxReference...')
                     else:
                         refFlux = pfsConfig[pfsConfig.fiberId == fid].psfFlux[0][idx_psfFlux]
                         logger.info(f'psfFlux is used...')

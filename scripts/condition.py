@@ -45,7 +45,7 @@ def get_condition(visit0, config, ax1, ax2):
     visits_to_process = check_qadb(qadb, visit0, visits[1:])
     print("visits to process: ", visits_to_process)
     cond=Condition(conf=config)
-    cond.getConditionAg(visits=visits_to_process, showPlot=False, xaxis='agc_exposure_id', cc='flags', saveFig=True, figName='test', dirName=figDir)
+    cond.getConditionAg(visits=visits_to_process, showPlot=False, xaxis='agc_exposure_id', cc='flags', saveFig=True, figName='test', dirName=figDir, corrColor=True)
     if len(visits)>0:
         if cond.df_seeing is not None:
             ndata = len(cond.df_seeing)
