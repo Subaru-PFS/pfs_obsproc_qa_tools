@@ -113,7 +113,13 @@ class Condition(object):
 
         """
         sqlWhere = f'agc_exposure.pfs_visit_id={visit}'
-        sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.agc_exptime,agc_exposure.taken_at,agc_data.agc_camera_id,image_moment_00_pix,central_image_moment_11_pix,central_image_moment_20_pix,central_image_moment_02_pix,peak_intensity,background,estimated_magnitude,agc_data.flags,agc_match.guide_star_id,pfs_design_agc.guide_star_magnitude,pfs_design_agc.guide_star_color,agc_match.agc_nominal_x_mm, agc_match.agc_nominal_y_mm, agc_match.agc_center_x_mm, agc_match.agc_center_y_mm FROM agc_exposure JOIN agc_data ON agc_exposure.agc_exposure_id=agc_data.agc_exposure_id JOIN agc_match ON agc_data.agc_exposure_id=agc_match.agc_exposure_id AND agc_data.agc_camera_id=agc_match.agc_camera_id AND agc_data.spot_id=agc_match.spot_id JOIN pfs_design_agc ON agc_match.pfs_design_id=pfs_design_agc.pfs_design_id AND agc_match.guide_star_id=pfs_design_agc.guide_star_id WHERE {sqlWhere} AND agc_data.flags<=1 AND agc_match.flags = 1 ORDER BY agc_exposure.agc_exposure_id;'
+        # The second moments are returned at half the spots' variance, the scale
+        # calcSeeing has always been given. ics_agccActor stored them that way
+        # while it wrote the literal 'git' (or nothing) as version_actor; since
+        # it records its real version there it stores the variance, which is
+        # halved here so that the seeing stays on one scale.
+        momentScale = "(CASE WHEN COALESCE(agc_exposure.version_actor, 'git') = 'git' THEN 1.0 ELSE 0.5 END)"
+        sqlCmd = f'SELECT agc_exposure.pfs_visit_id,agc_exposure.agc_exposure_id,agc_exposure.agc_exptime,agc_exposure.taken_at,agc_data.agc_camera_id,image_moment_00_pix,CAST(central_image_moment_11_pix*{momentScale} AS real) AS central_image_moment_11_pix,CAST(central_image_moment_20_pix*{momentScale} AS real) AS central_image_moment_20_pix,CAST(central_image_moment_02_pix*{momentScale} AS real) AS central_image_moment_02_pix,peak_intensity,background,estimated_magnitude,agc_data.flags,agc_match.guide_star_id,pfs_design_agc.guide_star_magnitude,pfs_design_agc.guide_star_color,agc_match.agc_nominal_x_mm, agc_match.agc_nominal_y_mm, agc_match.agc_center_x_mm, agc_match.agc_center_y_mm FROM agc_exposure JOIN agc_data ON agc_exposure.agc_exposure_id=agc_data.agc_exposure_id JOIN agc_match ON agc_data.agc_exposure_id=agc_match.agc_exposure_id AND agc_data.agc_camera_id=agc_match.agc_camera_id AND agc_data.spot_id=agc_match.spot_id JOIN pfs_design_agc ON agc_match.pfs_design_id=pfs_design_agc.pfs_design_id AND agc_match.guide_star_id=pfs_design_agc.guide_star_id WHERE {sqlWhere} AND agc_data.flags<=1 AND agc_match.flags = 1 ORDER BY agc_exposure.agc_exposure_id;'
         df = pd.read_sql(sql=sqlCmd, con=self.opdb._conn)
         return df
 
