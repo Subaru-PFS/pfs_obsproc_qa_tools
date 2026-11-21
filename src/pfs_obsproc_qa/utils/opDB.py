@@ -23,6 +23,10 @@ class OpDB(object):
         self.conf = conf
         self._engine = create_engine(get_url(self.conf))
         self._conn = self._engine.raw_connection()
+        # Read with autocommit so a SELECT never leaves this long-lived connection
+        # `idle in transaction`, which would pin the xmin horizon and block autovacuum.
+        # Must be set now, before any statement opens a transaction.
+        self._conn.driver_connection.autocommit = True
 
     def query(self, sqlCmd):
         df = pd.read_sql(sql=sqlCmd, con=self._conn)
